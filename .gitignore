@@ -23,3 +23,9 @@ tmp/
 # CLAUDE files (user instructions)
 CLAUDE.md
 .claude/
+claude.json
+.clauderc
+*.claude
+
+# Ignore the gitignore file itself from certain operations
+# .gitignore
