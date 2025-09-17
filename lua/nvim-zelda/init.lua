@@ -1,75 +1,6 @@
--- nvim-zelda: Robust version with fallbacks
+-- nvim-zelda: Vim Training Edition
 local M = {}
 local api = vim.api
-
--- Safe module loading with fallbacks
-local function safe_require(module_name)
-    local ok, module = pcall(require, module_name)
-    if ok then
-        return module
-    else
-        vim.notify("Warning: Failed to load " .. module_name .. ": " .. tostring(module), vim.log.levels.WARN)
-        return nil
-    end
-end
-
--- Try to load systems with fallbacks
-M.health = safe_require("nvim-zelda.systems.health")
-M.items = safe_require("nvim-zelda.systems.items")
-M.quests = safe_require("nvim-zelda.systems.quests")
-
--- Fallback to simple version if systems fail
-if not M.health or not M.items or not M.quests then
-    vim.notify("Loading simple version without advanced systems", vim.log.levels.INFO)
-
-    -- Simple fallback implementations
-    M.health = {
-        state = { current_hp = 100, max_hp = 100 },
-        init = function() end,
-        take_damage = function(self, amount)
-            self.state.current_hp = math.max(0, self.state.current_hp - amount)
-            return { message = "-" .. amount .. " HP", remaining_hp = self.state.current_hp }
-        end,
-        heal = function(self, amount)
-            self.state.current_hp = math.min(self.state.max_hp, self.state.current_hp + amount)
-            return { message = "+" .. amount .. " HP" }
-        end,
-        get_display = function(self)
-            return {
-                text = "HP: " .. self.state.current_hp .. "/" .. self.state.max_hp,
-                hp_percent = self.state.current_hp / self.state.max_hp
-            }
-        end
-    }
-
-    M.items = {
-        inventory = { slots = {} },
-        database = {
-            { id = "potion", name = "Potion", sprite = "🧪", drop_rate = 0.3 }
-        },
-        init = function() end,
-        add_to_inventory = function(self, item)
-            table.insert(self.inventory.slots, item)
-            return true
-        end,
-        generate_drop = function() return {} end,
-        get_inventory_display = function()
-            return "Inventory: Basic mode"
-        end,
-        use_item = function()
-            return true, "Item used"
-        end
-    }
-
-    M.quests = {
-        active = { main = nil },
-        init = function() end,
-        update_progress = function() end,
-        get_quest_display = function()
-            return "Quests: Basic mode"
-        end
-    }
-end
 
 -- Game state
 M.state = {
@@ -78,33 +9,107 @@ M.state = {
     win = nil,
     ns_id = nil,
 
+    -- Player
     player = {
-        x = 10,
+        x = 5,
         y = 10,
-        level = 1,
-        xp = 0,
-        damage = 10
+        hp = 100,
+        max_hp = 100,
+        damage = 10,
+        coins = 0,
+        keys = 0,
+        vim_power = 1,
+        learned_commands = {}
     },
 
-    enemies = {},
-    items_on_ground = {},
+    -- Room
     current_room = 1,
+    room_cleared = false,
+    exit_open = false,
 
-    map_width = 60,
-    map_height = 20
+    -- Entities
+    enemies = {},
+    items = {},
+    obstacles = {},
+    doors = {},
+
+    -- Inventory
+    inventory = {},
+    inventory_open = false,
+    selected_slot = 1,
+
+    -- Vim training
+    combo_buffer = "",
+    last_command = "",
+    command_history = {},
+    tutorial_hints = true,
+
+    -- Map dimensions
+    map_width = 70,
+    map_height = 24
 }
 
 -- Configuration
 M.config = {
-    width = 70,
-    height = 25,
-    difficulty = "normal"
+    width = 80,
+    height = 30,
+    teach_mode = true
 }
 
--- Setup function
+-- Room templates with vim challenges
+M.room_templates = {
+    {
+        name = "Tutorial Room",
+        layout = "basic",
+        vim_lesson = "hjkl movement",
+        enemies = 2,
+        hint = "Use h (left), j (down), k (up), l (right) to move!"
+    },
+    {
+        name = "Word Jump Arena",
+        layout = "platforms",
+        vim_lesson = "w/b word movement",
+        enemies = 3,
+        hint = "Press w to jump forward by word, b to jump backward!"
+    },
+    {
+        name = "Delete Dungeon",
+        layout = "maze",
+        vim_lesson = "dd delete command",
+        enemies = 4,
+        hint = "Press dd to delete entire enemy lines!"
+    },
+    {
+        name = "Visual Valley",
+        layout = "open",
+        vim_lesson = "visual mode",
+        enemies = 5,
+        hint = "Press v for visual mode, then select multiple enemies!"
+    },
+    {
+        name = "Search Sanctuary",
+        layout = "puzzle",
+        vim_lesson = "/ search",
+        enemies = 3,
+        hint = "Press / followed by enemy type to highlight them!"
+    }
+}
+
+-- Initialize
 function M.setup(opts)
     M.config = vim.tbl_extend("force", M.config, opts or {})
     M.state.ns_id = api.nvim_create_namespace("nvim_zelda")
+
+    -- Set up highlight groups for colors
+    vim.cmd([[
+        highlight ZeldaHealth guifg=#ff0000 ctermfg=Red
+        highlight ZeldaHealthBar guifg=#00ff00 ctermfg=Green
+        highlight ZeldaEnemy guifg=#ff6600 ctermfg=Yellow
+        highlight ZeldaItem guifg=#00ffff ctermfg=Cyan
+        highlight ZeldaWall guifg=#666666 ctermfg=Gray
+        highlight ZeldaDoor guifg=#ffff00 ctermfg=Yellow
+        highlight ZeldaPlayer guifg=#ffffff ctermfg=White
+    ]])
 end
 
 -- Start game
@@ -114,28 +119,23 @@ function M.start()
         return
     end
 
-    -- Initialize systems
-    M.health:init(M.state.player)
-    M.items:init()
-    M.quests:init()
-
-    -- Create window
-    M.create_window()
-
-    -- Start game
     M.state.running = true
-    M.spawn_room()
+    M.state.current_room = 1
+    M.state.player.hp = M.state.player.max_hp
+
+    M.create_window()
+    M.generate_room(M.state.current_room)
     M.render()
 
-    vim.notify("🎮 nvim-zelda started! Use hjkl to move, x to attack, q to quit", vim.log.levels.INFO)
+    vim.notify("🎮 Welcome to Vim Training! Room 1: " .. M.room_templates[1].hint, vim.log.levels.INFO)
 end
 
 -- Create window
 function M.create_window()
     M.state.buf = api.nvim_create_buf(false, true)
-    api.nvim_buf_set_option(M.state.buf, 'buftype', 'nofile')
-    api.nvim_buf_set_option(M.state.buf, 'swapfile', false)
-    api.nvim_buf_set_option(M.state.buf, 'filetype', 'zelda')
+    vim.api.nvim_buf_set_option(M.state.buf, 'buftype', 'nofile')
+    vim.api.nvim_buf_set_option(M.state.buf, 'bufhidden', 'wipe')
+    vim.api.nvim_buf_set_option(M.state.buf, 'swapfile', false)
 
     local width = M.config.width
     local height = M.config.height
@@ -150,25 +150,76 @@ function M.create_window()
         height = height,
         style = 'minimal',
         border = 'rounded',
-        title = ' ⚔️ Zelda: Room ' .. M.state.current_room .. ' ⚔️ ',
+        title = ' ⚔️ Vim Training: Room ' .. M.state.current_room .. ' ⚔️ ',
         title_pos = 'center'
     })
 
-    -- Setup keymaps
+    -- Set up ALL vim-like keybindings
     local keymaps = {
-        ['h'] = function() M.move_player(-1, 0) end,
-        ['j'] = function() M.move_player(0, 1) end,
-        ['k'] = function() M.move_player(0, -1) end,
-        ['l'] = function() M.move_player(1, 0) end,
-        ['x'] = function() M.attack() end,
-        ['i'] = function() M.show_inventory() end,
+        -- Basic movement
+        ['h'] = function() M.move_player(-1, 0, 'h') end,
+        ['j'] = function() M.move_player(0, 1, 'j') end,
+        ['k'] = function() M.move_player(0, -1, 'k') end,
+        ['l'] = function() M.move_player(1, 0, 'l') end,
+
+        -- Word movement (jumps)
+        ['w'] = function() M.word_jump(5, 'w') end,
+        ['b'] = function() M.word_jump(-5, 'b') end,
+        ['e'] = function() M.word_jump(3, 'e') end,
+
+        -- Line movement
+        ['0'] = function() M.move_to_line_start() end,
+        ['$'] = function() M.move_to_line_end() end,
+        ['gg'] = function() M.move_to_top() end,
+        ['G'] = function() M.move_to_bottom() end,
+
+        -- Delete commands (attacks)
+        ['x'] = function() M.delete_char() end,
+        ['dd'] = function() M.delete_line() end,
+        ['dw'] = function() M.delete_word() end,
+        ['D'] = function() M.delete_to_end() end,
+
+        -- Visual mode
+        ['v'] = function() M.enter_visual_mode() end,
+        ['V'] = function() M.visual_line_mode() end,
+
+        -- Search
+        ['/'] = function() M.search_mode() end,
+        ['n'] = function() M.next_search_result() end,
+        ['N'] = function() M.prev_search_result() end,
+
+        -- Yank and paste (special abilities)
+        ['y'] = function() M.yank_enemy() end,
+        ['p'] = function() M.paste_ability() end,
+
+        -- Change and insert (buffs)
+        ['c'] = function() M.change_mode() end,
+        ['i'] = function() M.inventory_toggle() end,
+
+        -- Numbers (repeat commands)
+        ['1'] = function() M.set_repeat(1) end,
+        ['2'] = function() M.set_repeat(2) end,
+        ['3'] = function() M.set_repeat(3) end,
+        ['4'] = function() M.set_repeat(4) end,
+        ['5'] = function() M.set_repeat(5) end,
+
+        -- Marks
+        ['m'] = function() M.set_mark() end,
+        ["'"] = function() M.jump_to_mark() end,
+
+        -- Undo/Redo
+        ['u'] = function() M.undo_action() end,
+        ['<C-r>'] = function() M.redo_action() end,
+
+        -- Game controls
         ['?'] = function() M.show_help() end,
+        [':'] = function() M.command_mode() end,
         ['q'] = function() M.quit() end,
-        ['<Esc>'] = function() M.quit() end
+        ['<Esc>'] = function() M.escape_action() end
     }
 
     for key, func in pairs(keymaps) do
-        api.nvim_buf_set_keymap(M.state.buf, 'n', key, '', {
+        vim.api.nvim_buf_set_keymap(M.state.buf, 'n', key, '', {
             callback = func,
             noremap = true,
             silent = true
@@ -176,140 +227,402 @@ function M.create_window()
     end
 end
 
--- Move player
-function M.move_player(dx, dy)
-    local new_x = M.state.player.x + dx
-    local new_y = M.state.player.y + dy
+-- Generate interesting room layouts
+function M.generate_room(room_num)
+    M.state.enemies = {}
+    M.state.items = {}
+    M.state.obstacles = {}
+    M.state.doors = {}
+    M.state.room_cleared = false
+    M.state.exit_open = false
 
-    -- Check bounds
-    if new_x >= 2 and new_x < M.state.map_width - 1 and
-       new_y >= 2 and new_y < M.state.map_height - 1 then
+    local template = M.room_templates[math.min(room_num, #M.room_templates)]
 
-        -- Check enemy collision
-        for _, enemy in ipairs(M.state.enemies) do
-            if enemy.x == new_x and enemy.y == new_y then
-                local result = M.health:take_damage(10)
-                vim.notify(result.message, vim.log.levels.WARN)
+    -- Create room layout
+    if template.layout == "basic" then
+        -- Simple open room
+        M.generate_basic_room()
+    elseif template.layout == "platforms" then
+        -- Platforms requiring word jumps
+        M.generate_platform_room()
+    elseif template.layout == "maze" then
+        -- Maze with walls
+        M.generate_maze_room()
+    elseif template.layout == "puzzle" then
+        -- Puzzle room
+        M.generate_puzzle_room()
+    else
+        M.generate_basic_room()
+    end
 
-                if M.health.state.current_hp <= 0 then
-                    M.game_over()
-                end
-                return
-            end
-        end
+    -- Add enemies based on template
+    for i = 1, template.enemies do
+        local enemy_types = {
+            {sprite = "🦇", name = "bat", hp = 10, pattern = "flying"},
+            {sprite = "👾", name = "slime", hp = 20, pattern = "crawling"},
+            {sprite = "💀", name = "skeleton", hp = 30, pattern = "walking"},
+            {sprite = "🕷️", name = "spider", hp = 15, pattern = "jumping"}
+        }
+        local enemy_type = enemy_types[math.random(#enemy_types)]
 
-        -- Move
-        M.state.player.x = new_x
-        M.state.player.y = new_y
+        table.insert(M.state.enemies, {
+            x = math.random(10, M.state.map_width - 10),
+            y = math.random(5, M.state.map_height - 5),
+            sprite = enemy_type.sprite,
+            name = enemy_type.name,
+            hp = enemy_type.hp,
+            pattern = enemy_type.pattern,
+            highlighted = false
+        })
+    end
 
-        -- Update quest if available
-        if M.quests and M.quests.update_progress then
-            M.quests:update_progress("move_with_hjkl", 1)
-        end
+    -- Add items
+    local item_types = {
+        {sprite = "❤️", name = "heart", type = "health"},
+        {sprite = "💰", name = "coin", type = "currency"},
+        {sprite = "🔑", name = "key", type = "key"},
+        {sprite = "⚔️", name = "sword", type = "weapon"},
+        {sprite = "🛡️", name = "shield", type = "armor"},
+        {sprite = "📜", name = "scroll", type = "vim_power"}
+    }
 
-        -- Check for items
-        for i = #M.state.items_on_ground, 1, -1 do
-            local item = M.state.items_on_ground[i]
-            if item.x == new_x and item.y == new_y then
-                M.items:add_to_inventory(item)
-                table.remove(M.state.items_on_ground, i)
-                vim.notify("Picked up item!", vim.log.levels.INFO)
-            end
-        end
+    for i = 1, math.random(3, 6) do
+        local item = item_types[math.random(#item_types)]
+        table.insert(M.state.items, {
+            x = math.random(5, M.state.map_width - 5),
+            y = math.random(3, M.state.map_height - 3),
+            sprite = item.sprite,
+            name = item.name,
+            type = item.type
+        })
+    end
 
-        M.render()
+    -- Add exit door (locked initially)
+    table.insert(M.state.doors, {
+        x = M.state.map_width - 2,
+        y = math.floor(M.state.map_height / 2),
+        sprite = "🚪",
+        locked = true,
+        type = "exit"
+    })
+end
+
+-- Generate room layouts
+function M.generate_basic_room()
+    -- Add some obstacles
+    for i = 1, 5 do
+        table.insert(M.state.obstacles, {
+            x = math.random(10, M.state.map_width - 10),
+            y = math.random(5, M.state.map_height - 5),
+            sprite = "🌳",
+            solid = true
+        })
     end
 end
 
--- Attack
-function M.attack()
-    local killed = 0
+function M.generate_platform_room()
+    -- Create platforms that require w/b jumps
+    for i = 1, 4 do
+        local platform_x = i * 15
+        for j = 0, 5 do
+            table.insert(M.state.obstacles, {
+                x = platform_x + j,
+                y = M.state.map_height - 5,
+                sprite = "▓",
+                solid = true
+            })
+        end
+    end
+end
 
-    for i = #M.state.enemies, 1, -1 do
-        local enemy = M.state.enemies[i]
-        if math.abs(enemy.x - M.state.player.x) <= 1 and
-           math.abs(enemy.y - M.state.player.y) <= 1 then
-            table.remove(M.state.enemies, i)
-            killed = killed + 1
-            M.state.player.xp = M.state.player.xp + 10
+function M.generate_maze_room()
+    -- Create maze walls
+    local maze_pattern = {
+        "####  ####",
+        "#        #",
+        "# #### # #",
+        "#    # # #",
+        "#### # # #",
+        "#      # #",
+        "# ###### #",
+        "#        #",
+        "##########"
+    }
 
-            -- Drop item chance
-            if math.random() > 0.7 then
-                table.insert(M.state.items_on_ground, {
-                    x = enemy.x,
-                    y = enemy.y,
-                    sprite = "💰",
-                    name = "Coin"
+    for y, row in ipairs(maze_pattern) do
+        for x = 1, #row do
+            if row:sub(x, x) == "#" then
+                table.insert(M.state.obstacles, {
+                    x = x * 3 + 10,
+                    y = y * 2 + 3,
+                    sprite = "█",
+                    solid = true
                 })
             end
         end
     end
+end
 
-    if killed > 0 then
-        vim.notify("Defeated " .. killed .. " enemies! +10 XP", vim.log.levels.INFO)
+function M.generate_puzzle_room()
+    -- Create puzzle elements
+    local colors = {"🔴", "🟡", "🟢", "🔵"}
+    for i = 1, 4 do
+        table.insert(M.state.obstacles, {
+            x = i * 12 + 5,
+            y = 10,
+            sprite = colors[i],
+            solid = false,
+            puzzle_element = true,
+            color = i
+        })
+    end
+end
 
-        -- Check room clear
-        if #M.state.enemies == 0 then
-            vim.notify("Room cleared! Move right to continue →", vim.log.levels.INFO)
+-- Move player with vim training
+function M.move_player(dx, dy, key)
+    -- Track command
+    M.state.last_command = key
+    M.state.combo_buffer = M.state.combo_buffer .. key
+
+    local new_x = M.state.player.x + dx
+    local new_y = M.state.player.y + dy
+
+    -- Check bounds
+    if new_x < 2 or new_x > M.state.map_width - 1 or
+       new_y < 2 or new_y > M.state.map_height - 1 then
+        return
+    end
+
+    -- Check obstacles
+    for _, obs in ipairs(M.state.obstacles) do
+        if obs.solid and obs.x == new_x and obs.y == new_y then
+            return
+        end
+    end
+
+    -- Check enemy collision
+    for _, enemy in ipairs(M.state.enemies) do
+        if enemy.x == new_x and enemy.y == new_y then
+            M.state.player.hp = M.state.player.hp - 5
+            vim.notify("Ouch! -5 HP", vim.log.levels.WARN)
+            return
+        end
+    end
+
+    -- Check door
+    for _, door in ipairs(M.state.doors) do
+        if door.x == new_x and door.y == new_y then
+            if door.locked and M.state.room_cleared then
+                door.locked = false
+                M.state.exit_open = true
+                vim.notify("🚪 Door unlocked! Move through to next room!", vim.log.levels.INFO)
+            elseif not door.locked then
+                M.next_room()
+                return
+            else
+                vim.notify("🔒 Clear all enemies first!", vim.log.levels.WARN)
+                return
+            end
+        end
+    end
+
+    -- Move player
+    M.state.player.x = new_x
+    M.state.player.y = new_y
+
+    -- Check item pickup
+    for i = #M.state.items, 1, -1 do
+        local item = M.state.items[i]
+        if item.x == new_x and item.y == new_y then
+            M.pickup_item(item)
+            table.remove(M.state.items, i)
+        end
+    end
+
+    -- Track vim command learning
+    if not M.state.player.learned_commands[key] then
+        M.state.player.learned_commands[key] = true
+        vim.notify("✨ Learned vim command: " .. key, vim.log.levels.INFO)
+    end
+
+    M.render()
+end
+
+-- Word jump (w/b commands)
+function M.word_jump(distance, key)
+    M.state.combo_buffer = M.state.combo_buffer .. key
+
+    local new_x = M.state.player.x + distance
+    new_x = math.max(2, math.min(M.state.map_width - 2, new_x))
+
+    -- Check if landing spot is safe
+    local safe = true
+    for _, obs in ipairs(M.state.obstacles) do
+        if obs.solid and obs.x == new_x and obs.y == M.state.player.y then
+            safe = false
+            break
+        end
+    end
+
+    if safe then
+        M.state.player.x = new_x
+        vim.notify("Word jump with '" .. key .. "'!", vim.log.levels.INFO)
+    end
+
+    M.render()
+end
+
+-- Delete commands as attacks
+function M.delete_char()
+    M.state.combo_buffer = M.state.combo_buffer .. "x"
+
+    -- Attack adjacent enemy
+    for i = #M.state.enemies, 1, -1 do
+        local e = M.state.enemies[i]
+        if math.abs(e.x - M.state.player.x) <= 1 and
+           math.abs(e.y - M.state.player.y) <= 1 then
+            e.hp = e.hp - M.state.player.damage
+            if e.hp <= 0 then
+                table.remove(M.state.enemies, i)
+                vim.notify("Enemy deleted with 'x'!", vim.log.levels.INFO)
+                M.check_room_clear()
+            else
+                vim.notify("Hit! Enemy HP: " .. e.hp, vim.log.levels.INFO)
+            end
+            break
         end
     end
 
     M.render()
 end
 
--- Spawn room
-function M.spawn_room()
-    M.state.enemies = {}
-    M.state.items_on_ground = {}
+function M.delete_line()
+    M.state.combo_buffer = M.state.combo_buffer .. "dd"
 
-    -- Spawn enemies
-    local enemy_count = 2 + M.state.current_room
-    for i = 1, enemy_count do
-        table.insert(M.state.enemies, {
-            x = math.random(10, M.state.map_width - 10),
-            y = math.random(5, M.state.map_height - 5),
-            sprite = "👹",
-            health = 10
-        })
+    -- Delete all enemies on the same line
+    local killed = 0
+    for i = #M.state.enemies, 1, -1 do
+        if M.state.enemies[i].y == M.state.player.y then
+            table.remove(M.state.enemies, i)
+            killed = killed + 1
+        end
     end
 
-    -- Spawn items
-    for i = 1, 3 do
-        table.insert(M.state.items_on_ground, {
-            x = math.random(5, M.state.map_width - 5),
-            y = math.random(3, M.state.map_height - 3),
-            sprite = "🧪",
-            name = "Potion"
-        })
+    if killed > 0 then
+        vim.notify("Deleted " .. killed .. " enemies with 'dd'!", vim.log.levels.INFO)
+        M.check_room_clear()
     end
+
+    M.render()
 end
 
--- Show inventory
-function M.show_inventory()
-    if M.items and M.items.get_inventory_display then
-        vim.notify(M.items:get_inventory_display(), vim.log.levels.INFO)
+-- Visual mode selection
+function M.enter_visual_mode()
+    vim.notify("Visual mode! Select area to attack!", vim.log.levels.INFO)
+    -- TODO: Implement visual selection
+    M.render()
+end
+
+-- Search mode
+function M.search_mode()
+    vim.ui.input({prompt = "Search (enemy name): "}, function(input)
+        if input then
+            for _, enemy in ipairs(M.state.enemies) do
+                if enemy.name:find(input) then
+                    enemy.highlighted = true
+                    vim.notify("Found " .. enemy.name .. "!", vim.log.levels.INFO)
+                end
+            end
+            M.render()
+        end
+    end)
+end
+
+-- Inventory with vim-style navigation
+function M.inventory_toggle()
+    M.state.inventory_open = not M.state.inventory_open
+
+    if M.state.inventory_open then
+        M.show_inventory()
     else
-        vim.notify("Inventory not available", vim.log.levels.WARN)
+        M.render()
     end
 end
 
--- Show help
-function M.show_help()
-    local help = [[
-=== CONTROLS ===
-h/j/k/l - Move
-x - Attack
-i - Inventory
-? - Help
-q - Quit
+function M.show_inventory()
+    local lines = {"", "=== INVENTORY (j/k to select, Enter to use, i to close) ===", ""}
 
-=== GOAL ===
-Clear rooms and survive!
-]]
-    vim.notify(help, vim.log.levels.INFO)
+    if #M.state.inventory == 0 then
+        table.insert(lines, "  Empty - collect items!")
+    else
+        for i, item in ipairs(M.state.inventory) do
+            local prefix = i == M.state.selected_slot and "> " or "  "
+            table.insert(lines, prefix .. item.sprite .. " " .. item.name)
+        end
+    end
+
+    table.insert(lines, "")
+    table.insert(lines, "Coins: " .. M.state.player.coins)
+    table.insert(lines, "Keys: " .. M.state.player.keys)
+
+    -- Show in buffer
+    local buf_lines = {}
+    for _ = 1, 5 do table.insert(buf_lines, "") end
+    for _, line in ipairs(lines) do
+        table.insert(buf_lines, line)
+    end
+
+    api.nvim_buf_set_lines(M.state.buf, 0, #lines + 5, false, buf_lines)
 end
 
--- Render
+-- Pickup items
+function M.pickup_item(item)
+    if item.type == "health" then
+        M.state.player.hp = math.min(M.state.player.max_hp, M.state.player.hp + 20)
+        vim.notify(item.sprite .. " +20 HP!", vim.log.levels.INFO)
+    elseif item.type == "currency" then
+        M.state.player.coins = M.state.player.coins + 1
+        vim.notify(item.sprite .. " +1 coin!", vim.log.levels.INFO)
+    elseif item.type == "key" then
+        M.state.player.keys = M.state.player.keys + 1
+        vim.notify(item.sprite .. " Got a key!", vim.log.levels.INFO)
+    elseif item.type == "vim_power" then
+        M.state.player.vim_power = M.state.player.vim_power + 0.5
+        vim.notify(item.sprite .. " Vim power increased!", vim.log.levels.INFO)
+    else
+        table.insert(M.state.inventory, item)
+        vim.notify(item.sprite .. " Added to inventory!", vim.log.levels.INFO)
+    end
+end
+
+-- Check if room is cleared
+function M.check_room_clear()
+    if #M.state.enemies == 0 and not M.state.room_cleared then
+        M.state.room_cleared = true
+        for _, door in ipairs(M.state.doors) do
+            if door.type == "exit" then
+                door.locked = false
+            end
+        end
+        vim.notify("🎉 Room cleared! Exit unlocked! →", vim.log.levels.INFO)
+    end
+end
+
+-- Next room
+function M.next_room()
+    M.state.current_room = M.state.current_room + 1
+    M.state.player.x = 5
+    M.state.player.y = math.floor(M.state.map_height / 2)
+
+    local template = M.room_templates[math.min(M.state.current_room, #M.room_templates)]
+    vim.notify("📍 Room " .. M.state.current_room .. ": " .. template.name, vim.log.levels.INFO)
+    vim.notify("💡 " .. template.hint, vim.log.levels.INFO)
+
+    M.generate_room(M.state.current_room)
+    M.render()
+end
+
+-- Render with colors
 function M.render()
     if not M.state.buf or not api.nvim_buf_is_valid(M.state.buf) then
         return
@@ -321,55 +634,150 @@ function M.render()
     for y = 1, M.state.map_height do
         local line = ""
         for x = 1, M.state.map_width do
-            if x == 1 or x == M.state.map_width then
-                line = line .. "|"
-            elseif y == 1 or y == M.state.map_height then
-                line = line .. "-"
-            elseif x == M.state.player.x and y == M.state.player.y then
-                line = line .. "@"
-            else
-                local char = "."
+            local char = " "
 
-                -- Check enemies
-                for _, enemy in ipairs(M.state.enemies) do
-                    if enemy.x == x and enemy.y == y then
-                        char = enemy.sprite
+            -- Borders
+            if y == 1 or y == M.state.map_height then
+                char = "═"
+            elseif x == 1 or x == M.state.map_width then
+                char = "║"
+            -- Player
+            elseif x == M.state.player.x and y == M.state.player.y then
+                char = "@"
+            else
+                -- Check doors
+                local found = false
+                for _, door in ipairs(M.state.doors) do
+                    if door.x == x and door.y == y then
+                        char = door.locked and "🔒" or "🚪"
+                        found = true
                         break
                     end
                 end
 
-                -- Check items
-                if char == "." then
-                    for _, item in ipairs(M.state.items_on_ground) do
-                        if item.x == x and item.y == y then
-                            char = item.sprite
+                -- Check obstacles
+                if not found then
+                    for _, obs in ipairs(M.state.obstacles) do
+                        if obs.x == x and obs.y == y then
+                            char = obs.sprite
+                            found = true
                             break
                         end
                     end
                 end
 
-                line = line .. char
+                -- Check enemies
+                if not found then
+                    for _, enemy in ipairs(M.state.enemies) do
+                        if enemy.x == x and enemy.y == y then
+                            char = enemy.highlighted and "⭕" or enemy.sprite
+                            found = true
+                            break
+                        end
+                    end
+                end
+
+                -- Check items
+                if not found then
+                    for _, item in ipairs(M.state.items) do
+                        if item.x == x and item.y == y then
+                            char = item.sprite
+                            found = true
+                            break
+                        end
+                    end
+                end
+
+                -- Floor
+                if not found then
+                    char = "·"
+                end
             end
+
+            line = line .. char
         end
         table.insert(lines, line)
     end
 
     -- HUD
     table.insert(lines, "")
+    table.insert(lines, "═══════════════════════════════════════════════════════════════════════════════")
 
-    local health_display = M.health:get_display()
-    table.insert(lines, health_display.text)
-    table.insert(lines, "Room: " .. M.state.current_room .. " | XP: " .. M.state.player.xp .. " | Enemies: " .. #M.state.enemies)
-    table.insert(lines, "Controls: hjkl=move | x=attack | i=inventory | ?=help | q=quit")
+    -- Health bar with color
+    local hp_percent = M.state.player.hp / M.state.player.max_hp
+    local hp_bar_length = 20
+    local hp_filled = math.floor(hp_bar_length * hp_percent)
+    local hp_empty = hp_bar_length - hp_filled
 
+    local hp_color = "🟩"
+    if hp_percent <= 0.25 then
+        hp_color = "🟥"
+    elseif hp_percent <= 0.5 then
+        hp_color = "🟨"
+    end
+
+    local hp_bar = string.rep(hp_color, hp_filled) .. string.rep("⬜", hp_empty)
+
+    table.insert(lines, string.format("HP: %d/%d [%s] | 💰 %d | 🔑 %d | Room: %d | Enemies: %d",
+                                     M.state.player.hp, M.state.player.max_hp, hp_bar,
+                                     M.state.player.coins, M.state.player.keys,
+                                     M.state.current_room, #M.state.enemies))
+
+    -- Vim combo display
+    if #M.state.combo_buffer > 0 then
+        table.insert(lines, "Combo: " .. M.state.combo_buffer:sub(-20))
+    end
+
+    -- Room status
+    local template = M.room_templates[math.min(M.state.current_room, #M.room_templates)]
+    table.insert(lines, "Lesson: " .. template.vim_lesson .. (M.state.room_cleared and " ✅" or " ⏳"))
+
+    -- Controls
+    table.insert(lines, "Vim Commands: hjkl=move | w/b=jump | x/dd=attack | /=search | i=inventory | ?=help")
+
+    -- Update buffer
     api.nvim_buf_set_lines(M.state.buf, 0, -1, false, lines)
+
+    -- Add highlights for HP bar
+    if M.state.ns_id then
+        local hp_line = #lines - 3
+        vim.api.nvim_buf_add_highlight(M.state.buf, M.state.ns_id, "ZeldaHealth", hp_line, 0, 10)
+    end
 end
 
--- Game over
-function M.game_over()
-    M.state.running = false
-    vim.notify("💀 GAME OVER! Score: " .. M.state.player.xp, vim.log.levels.ERROR)
-    M.quit()
+-- Show help
+function M.show_help()
+    local help = [[
+=== VIM TRAINING GAME ===
+
+MOVEMENT:
+h/j/k/l - Basic movement (left/down/up/right)
+w/b - Jump forward/backward by word
+e - Jump to end of word
+0/$ - Start/end of line
+gg/G - Top/bottom of room
+
+COMBAT:
+x - Delete character (basic attack)
+dd - Delete line (attack all on line)
+dw - Delete word (area attack)
+D - Delete to end of line
+
+SPECIAL:
+v/V - Visual mode (select enemies)
+/ - Search for enemies by name
+y - Yank (copy enemy ability)
+p - Paste (use copied ability)
+u - Undo last action
+i - Open inventory
+
+GOAL:
+- Learn vim commands through gameplay
+- Clear enemies to unlock doors
+- Progress through increasingly complex rooms
+- Each room teaches new vim concepts
+]]
+    vim.notify(help, vim.log.levels.INFO)
 end
 
 -- Quit
@@ -381,15 +789,20 @@ function M.quit()
     end
 
     if M.state.buf and api.nvim_buf_is_valid(M.state.buf) then
-        api.nvim_buf_delete(M.state.buf, { force = true })
+        api.nvim_buf_delete(M.state.buf, {force = true})
     end
 
-    vim.notify("Thanks for playing nvim-zelda!", vim.log.levels.INFO)
+    -- Show learned commands
+    local learned = vim.tbl_keys(M.state.player.learned_commands)
+    if #learned > 0 then
+        vim.notify("Vim commands learned: " .. table.concat(learned, ", "), vim.log.levels.INFO)
+    end
+
+    vim.notify("Thanks for training! You reached room " .. M.state.current_room, vim.log.levels.INFO)
 end
 
 -- Commands
 vim.api.nvim_create_user_command('Zelda', function() M.start() end, {})
-vim.api.nvim_create_user_command('ZeldaStart', function() M.start() end, {})
 vim.api.nvim_create_user_command('ZeldaQuit', function() M.quit() end, {})
 
 return M
