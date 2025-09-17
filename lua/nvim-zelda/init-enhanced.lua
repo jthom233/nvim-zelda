@@ -1,45 +1,91 @@
--- nvim-zelda v2: Enhanced with MLRSA-NG Polish System
--- A beautiful and educational Zelda-inspired game for learning Neovim
-
+-- nvim-zelda: Enhanced version with MLRSA-NG improvements
 local M = {}
 local api = vim.api
 local fn = vim.fn
 
--- Load modules
-local game = require("nvim-zelda.game")
-local quests = require("nvim-zelda.quests")
+-- Load enhancement modules (safe loading with fallback)
+local combo_system = nil
+local boss_system = nil
+local hints_system = nil
+local save_system = nil
 
--- Enhanced game state
+-- Try loading modules
+pcall(function()
+    combo_system = dofile(vim.fn.stdpath("data") .. "/lazy/nvim-zelda/lua/nvim-zelda/combo_system.lua")
+end)
+
+-- Game state with enhanced features
 local state = {
-    initialized = false,
-    level = 1,
-    score = 0,
-    player = nil,
-    entities = {},
-    map = {},
-    current_quest = nil,
-    stats = {
-        health = 5,
-        max_health = 5,
-        coins = 0,
-        keys = 0,
-        enemies_defeated = 0,
-        items_collected = 0,
-        steps = 0,
-    },
     buf = nil,
     win = nil,
     ns_id = nil,
-    timers = {},
+    player_x = 10,
+    player_y = 10,
+    health = 5,
+    max_health = 5,
+    coins = 0,
+    keys = 0,
+    level = 1,
+    score = 0,
+    map_width = 60,
+    map_height = 20,
+    running = false,
+    enemies = {},
+    items = {},
+    combo_buffer = {},
+    current_boss = nil,
+    achievements = {},
+    stats = {
+        enemies_defeated = 0,
+        items_collected = 0,
+        commands_used = {},
+        play_time = 0,
+    }
 }
 
--- Configuration
-M.config = vim.tbl_extend("force", game.config, {
-    enable_colors = true,
-    enable_animations = true,
-    enable_particles = true,
-    sound_feedback = true,
-})
+-- Enhanced Configuration
+M.config = {
+    width = 80,
+    height = 30,
+    teach_mode = true,
+    difficulty = "normal",
+    enable_combos = true,
+    enable_bosses = true,
+    enable_hints = true,
+    enable_save = true,
+}
+
+-- Combo definitions
+local combos = {
+    ["hjkl"] = {name = "Navigator", points = 10, desc = "Basic movement mastered!"},
+    ["dd"] = {name = "Line Slayer", points = 15, desc = "Delete enemies in line!"},
+    ["yp"] = {name = "Duplicator", points = 20, desc = "Copy and paste power!"},
+    ["gg"] = {name = "Top Jumper", points = 25, desc = "Jump to beginning!"},
+    ["G"] = {name = "End Seeker", points = 25, desc = "Jump to end!"},
+    ["ciw"] = {name = "Word Warrior", points = 30, desc = "Change inner word!"},
+    ["vi{"] = {name = "Block Master", points = 35, desc = "Select inside blocks!"},
+    [":%s"] = {name = "Replacer", points = 40, desc = "Substitute power activated!"},
+}
+
+-- Boss definitions
+local bosses = {
+    {
+        name = "Vim Dragon",
+        health = 50,
+        sprite = "🐉",
+        weakness = "dd",
+        attacks = {"syntax_error", "indent_chaos"},
+        intro = "I am the Vim Dragon! Show me your delete skills (dd)!"
+    },
+    {
+        name = "Modal Monster",
+        health = 75,
+        sprite = "👾",
+        weakness = "ciw",
+        attacks = {"mode_lock", "insert_trap"},
+        intro = "Modal Monster appears! Master 'ciw' to defeat me!"
+    },
+}
 
 -- Setup function
 function M.setup(opts)
@@ -47,553 +93,471 @@ function M.setup(opts)
     state.ns_id = api.nvim_create_namespace("nvim_zelda")
 end
 
--- Create the game window with better styling
+-- Check for combos
+local function check_combo(key)
+    if not M.config.enable_combos then return end
+
+    table.insert(state.combo_buffer, key)
+    if #state.combo_buffer > 10 then
+        table.remove(state.combo_buffer, 1)
+    end
+
+    local buffer_str = table.concat(state.combo_buffer)
+
+    for combo, data in pairs(combos) do
+        if buffer_str:match(combo .. "$") then
+            -- Combo activated!
+            state.score = state.score + data.points
+            vim.notify("🎯 " .. data.name .. "! " .. data.desc, vim.log.levels.INFO)
+            state.combo_buffer = {}
+            return data
+        end
+    end
+end
+
+-- Create game window with enhanced UI
 local function create_window()
     -- Create buffer
     state.buf = api.nvim_create_buf(false, true)
-    api.nvim_buf_set_name(state.buf, "Zelda Game")
+    api.nvim_buf_set_option(state.buf, 'buftype', 'nofile')
+    api.nvim_buf_set_option(state.buf, 'swapfile', false)
+    api.nvim_buf_set_option(state.buf, 'filetype', 'zelda')
 
-    -- Buffer options
-    local buf_opts = {
-        buftype = 'nofile',
-        bufhidden = 'wipe',
-        swapfile = false,
-        modifiable = false,
-        filetype = 'zelda',
-    }
-    for opt, val in pairs(buf_opts) do
-        api.nvim_buf_set_option(state.buf, opt, val)
-    end
-
-    -- Calculate window size and position
+    -- Calculate window position
     local width = M.config.width
-    local height = M.config.height + 6  -- Extra space for HUD
+    local height = M.config.height
     local row = math.floor((vim.o.lines - height) / 2)
     local col = math.floor((vim.o.columns - width) / 2)
 
-    -- Create floating window with style
-    local win_opts = {
+    -- Create window with enhanced styling
+    state.win = api.nvim_open_win(state.buf, true, {
         relative = 'editor',
-        width = width,
-        height = height,
         row = row,
         col = col,
+        width = width,
+        height = height,
         style = 'minimal',
         border = 'double',
-        title = ' ⚔️ Neovim Zelda ⚔️ ',
+        title = ' ⚔️  Zelda: Vim Quest - Level ' .. state.level .. ' ⚔️ ',
         title_pos = 'center',
-    }
-
-    state.win = api.nvim_open_win(state.buf, true, win_opts)
-
-    -- Window options
-    api.nvim_win_set_option(state.win, 'wrap', false)
-    api.nvim_win_set_option(state.win, 'cursorline', false)
-    api.nvim_win_set_option(state.win, 'number', false)
-    api.nvim_win_set_option(state.win, 'relativenumber', false)
-
-    -- Set up syntax highlighting
-    setup_highlights()
-end
-
--- Initialize the game level
-local function init_level(level_num)
-    local level = game.get_level(level_num)
-    state.level = level_num
-
-    -- Generate map
-    state.map = game.MapGenerator.create_room(level.width, level.height, level.type)
-    state.map = game.MapGenerator.add_obstacles(state.map, level.obstacle_density)
-
-    -- Clear entities
-    state.entities = {}
-
-    -- Create player
-    local player_x = math.floor(level.width / 2)
-    local player_y = math.floor(level.height / 2)
-    state.player = game.Entity:new(player_x, player_y, game.sprites.player_alt, "player")
-
-    -- Add enemies
-    for i = 1, level.enemies do
-        local x = math.random(2, level.width - 1)
-        local y = math.random(2, level.height - 1)
-        local enemy_types = {"enemy_slime", "enemy_skeleton", "enemy_bat"}
-        local enemy_type = enemy_types[math.random(#enemy_types)]
-        local enemy = game.Entity:new(x, y, game.sprites[enemy_type] or "E", "enemy")
-        table.insert(state.entities, enemy)
-    end
-
-    -- Add items
-    for i = 1, level.items do
-        local x = math.random(2, level.width - 1)
-        local y = math.random(2, level.height - 1)
-        local item_types = {"coin", "heart", "key"}
-        local item_type = item_types[math.random(#item_types)]
-        local sprite = game.sprites[item_type] or "*"
-        local item = game.Entity:new(x, y, sprite, item_type)
-        table.insert(state.entities, item)
-    end
-
-    -- Start quest
-    local next_quest = quests.get_next_quest()
-    if next_quest then
-        state.current_quest = quests.start_quest(next_quest.id)
-        show_notification(string.format("New Quest: %s", next_quest.name), "info")
-    end
-end
-
--- Render the game with improved visuals
-local function render()
-    if not state.buf or not api.nvim_buf_is_valid(state.buf) then
-        return
-    end
-
-    local lines = {}
-    local highlights = {}
-
-    -- Create HUD
-    local hud = game.UI.create_hud(state.stats)
-    for _, line in ipairs(hud) do
-        table.insert(lines, line)
-    end
-
-    table.insert(lines, string.rep("─", M.config.width))
-
-    -- Render map
-    local map_display = vim.deepcopy(state.map)
-
-    -- Place entities on map
-    for _, entity in ipairs(state.entities) do
-        if entity.active then
-            map_display[entity.y][entity.x] = entity.sprite
-        end
-    end
-
-    -- Place particles
-    for _, particle in ipairs(game.particles_list) do
-        if map_display[particle.y] and map_display[particle.y][particle.x] then
-            map_display[particle.y][particle.x] = particle.sprite
-        end
-    end
-
-    -- Place player
-    map_display[state.player.y][state.player.x] = state.player.sprite
-
-    -- Convert map to lines
-    for y = 1, #map_display do
-        local line = ""
-        for x = 1, #map_display[y] do
-            line = line .. (map_display[y][x] or " ")
-        end
-        table.insert(lines, line)
-    end
-
-    -- Add status and instructions
-    table.insert(lines, string.rep("─", M.config.width))
-
-    -- Quest status
-    if state.current_quest then
-        table.insert(lines, string.format("Quest: %s", state.current_quest.name))
-    end
-
-    -- Controls hint
-    table.insert(lines, "Controls: hjkl=move w/b=jump gg/G=top/bottom d=attack y=collect /=search q=quit")
-
-    -- Update buffer
-    api.nvim_buf_set_option(state.buf, 'modifiable', true)
-    api.nvim_buf_set_lines(state.buf, 0, -1, false, lines)
-    api.nvim_buf_set_option(state.buf, 'modifiable', false)
-
-    -- Apply highlights if enabled
-    if M.config.enable_colors then
-        apply_highlights(highlights)
-    end
-
-    -- Update animations
-    if M.config.enable_animations then
-        game.Animations.update()
-    end
-
-    -- Update particles
-    if M.config.enable_particles then
-        game.Particles.update()
-    end
-end
-
--- Setup syntax highlighting
-local function setup_highlights()
-    -- Define highlight groups
-    local highlights = {
-        ZeldaPlayer = {fg = "#00ff00", bold = true},
-        ZeldaEnemy = {fg = "#ff0000", bold = true},
-        ZeldaItem = {fg = "#ffff00", bold = true},
-        ZeldaWall = {fg = "#888888"},
-        ZeldaGrass = {fg = "#228822"},
-        ZeldaWater = {fg = "#0088ff"},
-        ZeldaHeart = {fg = "#ff0088", bold = true},
-        ZeldaCoin = {fg = "#ffaa00", bold = true},
-        ZeldaKey = {fg = "#ffff00", bold = true},
-    }
-
-    for group, opts in pairs(highlights) do
-        api.nvim_set_hl(0, group, opts)
-    end
-end
-
--- Apply highlights to buffer
-local function apply_highlights(highlight_list)
-    -- Clear existing highlights
-    if state.ns_id and state.buf then
-        api.nvim_buf_clear_namespace(state.buf, state.ns_id, 0, -1)
-    end
-
-    -- Apply new highlights
-    for _, hl in ipairs(highlight_list) do
-        api.nvim_buf_add_highlight(
-            state.buf,
-            state.ns_id,
-            hl.group,
-            hl.line,
-            hl.col_start,
-            hl.col_end
-        )
-    end
-end
-
--- Enhanced movement with animations
-local function move_player(direction)
-    local dx, dy = 0, 0
-
-    -- Calculate movement based on direction
-    local movements = {
-        h = {-1, 0},
-        l = {1, 0},
-        j = {0, 1},
-        k = {0, -1},
-        w = {5, 0},   -- Word jump
-        b = {-5, 0},  -- Word back
-    }
-
-    if movements[direction] then
-        dx, dy = movements[direction][1], movements[direction][2]
-    elseif direction == "gg" then
-        -- Jump to top
-        dy = 1 - state.player.y
-    elseif direction == "G" then
-        -- Jump to bottom
-        dy = #state.map - state.player.y
-    end
-
-    -- Try to move
-    local old_x, old_y = state.player.x, state.player.y
-    if state.player:move(dx, dy, state.map) then
-        state.stats.steps = state.stats.steps + 1
-
-        -- Update quest progress
-        if state.current_quest then
-            quests.update_progress(direction)
-        end
-
-        -- Check collisions
-        check_collisions()
-
-        -- Add movement particle effect
-        if M.config.enable_particles then
-            game.Particles.create(old_x, old_y, "sparkle", 3)
-        end
-
-        -- Sound feedback
-        if M.config.sound_feedback then
-            show_notification("*step*", "debug", 100)
-        end
-    else
-        -- Hit wall feedback
-        if M.config.sound_feedback then
-            show_notification("*bump*", "warn", 500)
-        end
-    end
-
-    render()
-end
-
--- Check collisions with entities
-local function check_collisions()
-    for i = #state.entities, 1, -1 do
-        local entity = state.entities[i]
-        if entity.active and entity.x == state.player.x and entity.y == state.player.y then
-            if entity.type == "coin" then
-                state.stats.coins = state.stats.coins + 1
-                state.score = state.score + 10
-                entity.active = false
-                show_notification("💰 Coin collected! +10 points", "info")
-
-                if M.config.enable_particles then
-                    game.Particles.create(entity.x, entity.y, "sparkle", 5)
-                end
-            elseif entity.type == "heart" then
-                state.stats.health = math.min(state.stats.health + 1, state.stats.max_health)
-                entity.active = false
-                show_notification("❤️ Health restored!", "info")
-
-                if M.config.enable_particles then
-                    game.Particles.create(entity.x, entity.y, "sparkle", 5)
-                end
-            elseif entity.type == "key" then
-                state.stats.keys = state.stats.keys + 1
-                entity.active = false
-                show_notification("🔑 Key found!", "info")
-
-                if M.config.enable_particles then
-                    game.Particles.create(entity.x, entity.y, "sparkle", 5)
-                end
-            elseif entity.type == "enemy" then
-                -- Take damage
-                state.stats.health = state.stats.health - 1
-                show_notification("💔 Ouch! Use 'd' to attack!", "error")
-
-                if state.stats.health <= 0 then
-                    game_over()
-                end
-            end
-        end
-    end
-end
-
--- Attack action with animation
-local function attack()
-    -- Create attack animation
-    if M.config.enable_animations then
-        game.Animations.create(state.player, "attack")
-    end
-
-    -- Check for adjacent enemies
-    for i = #state.entities, 1, -1 do
-        local entity = state.entities[i]
-        if entity.active and entity.type == "enemy" then
-            local dist = math.abs(entity.x - state.player.x) + math.abs(entity.y - state.player.y)
-            if dist <= 1 then
-                entity.health = entity.health - 1
-
-                if entity.health <= 0 then
-                    entity.active = false
-                    state.stats.enemies_defeated = state.stats.enemies_defeated + 1
-                    state.score = state.score + 25
-                    show_notification("⚔️ Enemy defeated! +25 points", "info")
-
-                    if M.config.enable_particles then
-                        game.Particles.create(entity.x, entity.y, "explosion", 8)
-                    end
-
-                    -- Update quest
-                    if state.current_quest then
-                        quests.update_progress("d")
-                    end
-                else
-                    show_notification("💥 Enemy hit!", "info")
-
-                    if M.config.enable_animations then
-                        game.Animations.create(entity, "hurt")
-                    end
-                end
-
-                break
-            end
-        end
-    end
-
-    render()
-end
-
--- Show notification with vim.notify
-function show_notification(msg, level, timeout)
-    level = level or "info"
-    local log_level = {
-        debug = vim.log.levels.DEBUG,
-        info = vim.log.levels.INFO,
-        warn = vim.log.levels.WARN,
-        error = vim.log.levels.ERROR,
-    }
-
-    vim.notify(msg, log_level[level], {
-        title = "Neovim Zelda",
-        timeout = timeout or 2000,
     })
-end
 
--- Game over handler
-local function game_over()
-    show_notification(string.format("Game Over! Final Score: %d", state.score), "error", 5000)
-
-    -- Show stats
-    local stats_msg = string.format(
-        "Stats:\nEnemies Defeated: %d\nItems Collected: %d\nSteps Taken: %d",
-        state.stats.enemies_defeated,
-        state.stats.items_collected,
-        state.stats.steps
-    )
-    show_notification(stats_msg, "info", 10000)
-
-    -- Close after delay
-    vim.defer_fn(function()
-        M.quit()
-    end, 5000)
-end
-
--- Victory handler
-local function victory()
-    show_notification("🎉 Victory! Level Complete!", "info", 3000)
-
-    -- Progress to next level
-    if state.level < #game.Levels then
-        state.level = state.level + 1
-        show_notification(string.format("Advancing to Level %d...", state.level), "info")
-        vim.defer_fn(function()
-            init_level(state.level)
-            render()
-        end, 2000)
-    else
-        show_notification("🏆 Congratulations! You've mastered Neovim Zelda!", "info", 10000)
-        vim.defer_fn(function()
-            M.quit()
-        end, 5000)
-    end
-end
-
--- Setup key mappings
-local function setup_mappings()
-    local mappings = {
+    -- Enhanced keymaps
+    local keymaps = {
         -- Movement
-        ['h'] = function() move_player('h') end,
-        ['j'] = function() move_player('j') end,
-        ['k'] = function() move_player('k') end,
-        ['l'] = function() move_player('l') end,
-        ['w'] = function() move_player('w') end,
-        ['b'] = function() move_player('b') end,
-        ['gg'] = function() move_player('gg') end,
-        ['G'] = function() move_player('G') end,
-
+        ['h'] = function() move_player(-1, 0, 'h') end,
+        ['j'] = function() move_player(0, 1, 'j') end,
+        ['k'] = function() move_player(0, -1, 'k') end,
+        ['l'] = function() move_player(1, 0, 'l') end,
+        -- Advanced movement
+        ['w'] = function() jump_word(1) end,
+        ['b'] = function() jump_word(-1) end,
+        ['gg'] = function() teleport_top() end,
+        ['G'] = function() teleport_bottom() end,
         -- Actions
-        ['d'] = attack,
-        ['y'] = function() show_notification("Move over items to collect them!", "info") end,
-        ['/'] = function() show_notification("Search: Use / followed by text in vim!", "info") end,
-
-        -- Game
+        ['x'] = function() attack() end,
+        ['d'] = function() check_combo('d') end,
+        ['y'] = function() check_combo('y') end,
+        ['p'] = function() check_combo('p') end,
+        ['i'] = function() check_combo('i') end,
+        ['c'] = function() check_combo('c') end,
+        ['v'] = function() check_combo('v') end,
+        -- Game controls
+        ['?'] = function() show_help() end,
+        ['s'] = function() save_game() end,
         ['q'] = function() M.quit() end,
-        ['?'] = function() M.show_help() end,
-        ['r'] = function() init_level(state.level); render() end,
+        ['<Esc>'] = function() M.quit() end,
     }
 
-    for key, func in pairs(mappings) do
+    for key, func in pairs(keymaps) do
         api.nvim_buf_set_keymap(state.buf, 'n', key, '', {
             callback = func,
             noremap = true,
             silent = true
         })
     end
+
+    -- Track command usage
+    api.nvim_create_autocmd("CursorMoved", {
+        buffer = state.buf,
+        callback = function()
+            state.stats.play_time = state.stats.play_time + 1
+        end
+    })
 end
 
--- Game update loop
-local function update_game()
-    if not state.initialized then
-        return
-    end
+-- Enhanced movement with combo tracking
+function move_player(dx, dy, key)
+    check_combo(key)
 
-    -- Update entities
-    for _, entity in ipairs(state.entities) do
-        if entity.active then
-            entity:update(state.map, state.player, state.entities)
+    local new_x = state.player_x + dx
+    local new_y = state.player_y + dy
+
+    -- Check boundaries
+    if new_x >= 2 and new_x < state.map_width - 1 and
+       new_y >= 2 and new_y < state.map_height - 1 then
+
+        -- Check for enemy collision
+        for i, enemy in ipairs(state.enemies) do
+            if enemy.x == new_x and enemy.y == new_y then
+                state.health = state.health - 1
+                vim.notify("💥 Hit enemy! Health: " .. state.health, vim.log.levels.WARN)
+                if state.health <= 0 then
+                    game_over()
+                    return
+                end
+            end
+        end
+
+        -- Check for item collection
+        for i, item in ipairs(state.items) do
+            if item.x == new_x and item.y == new_y then
+                collect_item(item, i)
+            end
+        end
+
+        state.player_x = new_x
+        state.player_y = new_y
+        render_game()
+    end
+end
+
+-- Advanced movement functions
+function jump_word(direction)
+    check_combo(direction > 0 and 'w' or 'b')
+    state.player_x = math.max(2, math.min(state.map_width - 2,
+                              state.player_x + (direction * 5)))
+    render_game()
+end
+
+function teleport_top()
+    check_combo('g')
+    check_combo('g')
+    state.player_y = 2
+    render_game()
+end
+
+function teleport_bottom()
+    check_combo('G')
+    state.player_y = state.map_height - 2
+    render_game()
+end
+
+-- Attack function
+function attack()
+    check_combo('x')
+
+    -- Attack enemies around player
+    for i = #state.enemies, 1, -1 do
+        local enemy = state.enemies[i]
+        if math.abs(enemy.x - state.player_x) <= 1 and
+           math.abs(enemy.y - state.player_y) <= 1 then
+            table.remove(state.enemies, i)
+            state.stats.enemies_defeated = state.stats.enemies_defeated + 1
+            state.score = state.score + 5
+            vim.notify("⚔️ Enemy defeated! Score: " .. state.score, vim.log.levels.INFO)
         end
     end
 
-    -- Check victory condition
-    local enemies_left = 0
-    for _, entity in ipairs(state.entities) do
-        if entity.active and entity.type == "enemy" then
-            enemies_left = enemies_left + 1
+    -- Check boss damage
+    if state.current_boss then
+        state.current_boss.health = state.current_boss.health - 5
+        if state.current_boss.health <= 0 then
+            defeat_boss()
         end
     end
 
-    if enemies_left == 0 then
-        victory()
+    render_game()
+end
+
+-- Collect item
+function collect_item(item, index)
+    if item.type == "coin" then
+        state.coins = state.coins + 1
+        vim.notify("💰 Coin collected! Total: " .. state.coins, vim.log.levels.INFO)
+    elseif item.type == "heart" then
+        state.health = math.min(state.max_health, state.health + 1)
+        vim.notify("❤️ Health restored! HP: " .. state.health, vim.log.levels.INFO)
+    elseif item.type == "key" then
+        state.keys = state.keys + 1
+        vim.notify("🔑 Key found! Keys: " .. state.keys, vim.log.levels.INFO)
     end
 
-    render()
+    table.remove(state.items, index)
+    state.stats.items_collected = state.stats.items_collected + 1
+end
+
+-- Spawn entities
+function spawn_entities()
+    -- Clear old entities
+    state.enemies = {}
+    state.items = {}
+
+    -- Spawn enemies based on level
+    local enemy_count = 2 + (state.level * 2)
+    for i = 1, enemy_count do
+        table.insert(state.enemies, {
+            x = math.random(3, state.map_width - 3),
+            y = math.random(3, state.map_height - 3),
+            type = "slime",
+            sprite = "👹"
+        })
+    end
+
+    -- Spawn items
+    local item_count = 3 + state.level
+    for i = 1, item_count do
+        local item_types = {"coin", "heart", "key"}
+        local item_sprites = {coin = "💰", heart = "❤️", key = "🔑"}
+        local itype = item_types[math.random(#item_types)]
+
+        table.insert(state.items, {
+            x = math.random(3, state.map_width - 3),
+            y = math.random(3, state.map_height - 3),
+            type = itype,
+            sprite = item_sprites[itype]
+        })
+    end
+
+    -- Spawn boss every 3 levels
+    if state.level % 3 == 0 and M.config.enable_bosses then
+        local boss = bosses[math.random(#bosses)]
+        state.current_boss = vim.deepcopy(boss)
+        state.current_boss.x = state.map_width / 2
+        state.current_boss.y = 3
+        vim.notify("⚠️ BOSS BATTLE: " .. boss.intro, vim.log.levels.WARN)
+    end
+end
+
+-- Defeat boss
+function defeat_boss()
+    vim.notify("🎊 BOSS DEFEATED! Amazing vim skills!", vim.log.levels.INFO)
+    state.score = state.score + 100
+    state.current_boss = nil
+    state.level = state.level + 1
+    spawn_entities()
+end
+
+-- Game over
+function game_over()
+    vim.notify("💀 GAME OVER! Final Score: " .. state.score, vim.log.levels.ERROR)
+    vim.notify("Stats - Enemies: " .. state.stats.enemies_defeated ..
+               " | Items: " .. state.stats.items_collected, vim.log.levels.INFO)
+    M.quit()
 end
 
 -- Show help
-function M.show_help()
-    local help = [[
-╔══════════════════════════════════════════╗
-║          NEOVIM ZELDA - HELP             ║
-╠══════════════════════════════════════════╣
-║ MOVEMENT:                                 ║
-║   hjkl - Basic movement                  ║
-║   w/b  - Jump forward/backward           ║
-║   gg/G - Jump to top/bottom              ║
-║                                          ║
-║ ACTIONS:                                 ║
-║   d - Attack (when near enemy)           ║
-║   y - Yank/collect reminder              ║
-║   / - Search tutorial                    ║
-║                                          ║
-║ GAME:                                    ║
-║   r - Restart level                      ║
-║   ? - Show this help                     ║
-║   q - Quit game                          ║
-║                                          ║
-║ OBJECTIVES:                              ║
-║   - Defeat all enemies                   ║
-║   - Collect coins and items              ║
-║   - Complete quests to learn vim         ║
-║   - Progress through levels              ║
-╚══════════════════════════════════════════╝
-    ]]
-    show_notification(help, "info", 10000)
+function show_help()
+    local help = {
+        "=== VIM ZELDA CONTROLS ===",
+        "Movement: h/j/k/l (vim navigation)",
+        "Jump: w/b (word jump), gg/G (top/bottom)",
+        "Attack: x (delete char in vim)",
+        "Combos: Try vim commands like dd, yp, ciw!",
+        "Save: s | Help: ? | Quit: q",
+        "",
+        "=== ACTIVE COMBOS ===",
+    }
+
+    for combo, data in pairs(combos) do
+        table.insert(help, combo .. " - " .. data.name .. " (" .. data.points .. " pts)")
+    end
+
+    vim.notify(table.concat(help, "\n"), vim.log.levels.INFO)
+end
+
+-- Save game
+function save_game()
+    if not M.config.enable_save then return end
+
+    local save_dir = vim.fn.stdpath("data") .. "/nvim-zelda/"
+    vim.fn.mkdir(save_dir, "p")
+
+    local save_data = vim.json.encode(state)
+    local save_file = save_dir .. "save.json"
+    vim.fn.writefile({save_data}, save_file)
+
+    vim.notify("💾 Game saved!", vim.log.levels.INFO)
+end
+
+-- Load game
+function load_game()
+    if not M.config.enable_save then return false end
+
+    local save_file = vim.fn.stdpath("data") .. "/nvim-zelda/save.json"
+    if vim.fn.filereadable(save_file) == 1 then
+        local data = vim.fn.readfile(save_file)
+        if data and data[1] then
+            local loaded = vim.json.decode(data[1])
+            -- Restore state (except window/buffer)
+            for k, v in pairs(loaded) do
+                if k ~= "buf" and k ~= "win" and k ~= "ns_id" then
+                    state[k] = v
+                end
+            end
+            return true
+        end
+    end
+    return false
+end
+
+-- Enhanced render function
+function render_game()
+    if not state.buf or not api.nvim_buf_is_valid(state.buf) then
+        return
+    end
+
+    local lines = {}
+
+    -- Create map with entities
+    for y = 1, state.map_height do
+        local line = ""
+        for x = 1, state.map_width do
+            local char = ""
+
+            -- Borders
+            if x == 1 or x == state.map_width then
+                char = "║"
+            elseif y == 1 or y == state.map_height then
+                char = "═"
+            -- Player
+            elseif x == state.player_x and y == state.player_y then
+                char = "🗡"
+            else
+                -- Check for entities at this position
+                local entity_found = false
+
+                -- Boss
+                if state.current_boss and x == state.current_boss.x and y == state.current_boss.y then
+                    char = state.current_boss.sprite
+                    entity_found = true
+                end
+
+                -- Enemies
+                if not entity_found then
+                    for _, enemy in ipairs(state.enemies) do
+                        if enemy.x == x and enemy.y == y then
+                            char = enemy.sprite
+                            entity_found = true
+                            break
+                        end
+                    end
+                end
+
+                -- Items
+                if not entity_found then
+                    for _, item in ipairs(state.items) do
+                        if item.x == x and item.y == y then
+                            char = item.sprite
+                            entity_found = true
+                            break
+                        end
+                    end
+                end
+
+                -- Empty space
+                if not entity_found then
+                    char = "·"
+                end
+            end
+
+            line = line .. char
+        end
+        table.insert(lines, line)
+    end
+
+    -- Add enhanced HUD
+    table.insert(lines, "")
+    table.insert(lines, "═══════════════════════════════════════════════════════════════")
+
+    -- Health bar
+    local health_bar = " HP: "
+    for i = 1, state.max_health do
+        health_bar = health_bar .. (i <= state.health and "❤️" or "🖤")
+    end
+    table.insert(lines, health_bar .. "  |  💰 " .. state.coins .. "  |  🔑 " .. state.keys ..
+                 "  |  ⭐ Score: " .. state.score .. "  |  📍 Level: " .. state.level)
+
+    -- Boss health
+    if state.current_boss then
+        table.insert(lines, " BOSS: " .. state.current_boss.name .. " [" ..
+                     string.rep("█", state.current_boss.health / 5) ..
+                     string.rep("░", 10 - state.current_boss.health / 5) .. "]")
+    end
+
+    -- Combo buffer display
+    if #state.combo_buffer > 0 then
+        table.insert(lines, " Combo: " .. table.concat(state.combo_buffer))
+    end
+
+    table.insert(lines, "═══════════════════════════════════════════════════════════════")
+    table.insert(lines, " Controls: hjkl=move | x=attack | ?=help | s=save | q=quit")
+
+    if M.config.teach_mode then
+        table.insert(lines, " 💡 Tip: Try vim combos like 'dd', 'yp', 'ciw' for bonus points!")
+    end
+
+    -- Update buffer
+    api.nvim_buf_set_lines(state.buf, 0, -1, false, lines)
+
+    -- Add colors if available
+    if state.ns_id then
+        -- Color the player
+        vim.api.nvim_buf_add_highlight(state.buf, state.ns_id, "Character",
+                                       state.player_y - 1,
+                                       (state.player_x - 1) * 2,
+                                       state.player_x * 2)
+    end
 end
 
 -- Start the game
 function M.start()
-    if state.initialized then
-        show_notification("Game already running!", "warn")
+    if state.running then
+        vim.notify("Game already running!", vim.log.levels.WARN)
         return
     end
 
-    state.initialized = true
-    state.score = 0
+    state.running = true
+
+    -- Try to load saved game
+    if load_game() then
+        vim.notify("💾 Save game loaded! Continue your adventure!", vim.log.levels.INFO)
+    else
+        spawn_entities()
+        vim.notify("🎮 Welcome to Zelda: Vim Quest! Master vim to survive!", vim.log.levels.INFO)
+    end
 
     create_window()
-    init_level(1)
-    setup_mappings()
-    render()
-
-    -- Start game loop
-    state.timers.update = vim.fn.timer_start(500, function()
-        update_game()
-    end, {['repeat'] = -1})
-
-    show_notification("Welcome to Neovim Zelda! Press ? for help", "info")
+    render_game()
 end
 
 -- Quit the game
 function M.quit()
-    state.initialized = false
-
-    -- Stop timers
-    for _, timer in pairs(state.timers) do
-        vim.fn.timer_stop(timer)
+    -- Optional: Auto-save on quit
+    if state.running and M.config.enable_save then
+        save_game()
     end
-    state.timers = {}
 
-    -- Close window
     if state.win and api.nvim_win_is_valid(state.win) then
         api.nvim_win_close(state.win, true)
     end
 
-    show_notification(string.format("Thanks for playing! Final Score: %d", state.score), "info")
+    if state.buf and api.nvim_buf_is_valid(state.buf) then
+        api.nvim_buf_delete(state.buf, { force = true })
+    end
+
+    state.running = false
+    state.buf = nil
+    state.win = nil
+
+    vim.notify("Thanks for playing Zelda: Vim Quest! Your vim skills have improved!", vim.log.levels.INFO)
 end
 
--- Public API
-M.move = move_player
-M.attack = attack
+-- Commands
+vim.api.nvim_create_user_command('Zelda', function() M.start() end, {})
+vim.api.nvim_create_user_command('ZeldaStart', function() M.start() end, {})
+vim.api.nvim_create_user_command('ZeldaQuit', function() M.quit() end, {})
+vim.api.nvim_create_user_command('ZeldaSave', function() save_game() end, {})
+vim.api.nvim_create_user_command('ZeldaHelp', function() show_help() end, {})
 
 return M
