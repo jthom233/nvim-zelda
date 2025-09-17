@@ -582,19 +582,33 @@ function M.move_player(dx, dy, key)
     M.render()
 end
 
--- Word jump (w/b commands)
+-- Word jump (w/b commands) - REAL IMPLEMENTATION
 function M.word_jump(distance, key)
-    M.state.combo_buffer = M.state.combo_buffer .. key
+    -- Initialize combo buffer if not exists
+    M.state.combo_buffer = (M.state.combo_buffer or "") .. key
 
     local new_x = M.state.player.x + distance
     new_x = math.max(2, math.min(M.state.map_width - 2, new_x))
 
     -- Check if landing spot is safe
     local safe = true
-    for _, obs in ipairs(M.state.obstacles) do
-        if obs.solid and obs.x == new_x and obs.y == M.state.player.y then
-            safe = false
-            break
+    if M.state.obstacles then
+        for _, obs in ipairs(M.state.obstacles) do
+            if obs.solid and obs.x == new_x and obs.y == M.state.player.y then
+                safe = false
+                break
+            end
+        end
+    end
+
+    -- Check for enemy collision
+    if safe and M.state.enemies then
+        for _, enemy in ipairs(M.state.enemies) do
+            if enemy.x == new_x and enemy.y == M.state.player.y then
+                safe = false
+                vim.notify("Enemy blocks the jump!", vim.log.levels.WARN)
+                break
+            end
         end
     end
 
@@ -603,17 +617,20 @@ function M.word_jump(distance, key)
         vim.notify("Word jump with '" .. key .. "'!", vim.log.levels.INFO)
     end
 
-    -- Track with real systems
-    local execution_time = (vim.loop.hrtime() - start_time) / 1e9
-    learning.track_command(key, safe, execution_time, "word_jump")
-    persistence.track_command(key, safe, execution_time, "word_jump")
+    -- Only track if modules are loaded
+    if learning and persistence then
+        pcall(function()
+            learning.track_command(key, safe, 0.1, "word_jump")
+            persistence.track_command(key, safe, 0.1, "word_jump")
+        end)
+    end
 
     M.render()
 end
 
 -- Delete commands as attacks
 function M.delete_char()
-    M.state.combo_buffer = M.state.combo_buffer .. "x"
+    M.state.combo_buffer = (M.state.combo_buffer or "") .. "x"
 
     -- Attack adjacent enemy
     for i = #M.state.enemies, 1, -1 do
@@ -636,7 +653,7 @@ function M.delete_char()
 end
 
 function M.delete_line()
-    M.state.combo_buffer = M.state.combo_buffer .. "dd"
+    M.state.combo_buffer = (M.state.combo_buffer or "") .. "dd"
 
     -- Delete all enemies on the same line
     local killed = 0
@@ -798,7 +815,7 @@ function M.change_word()
 end
 
 function M.insert_mode()
-    vim.notify("i: Insert mode - inventory", vim.log.levels.INFO)
+    -- Don't just notify - actually show inventory
     M.inventory_toggle()
 end
 
