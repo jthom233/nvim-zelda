@@ -2,12 +2,27 @@
 local M = {}
 local api = vim.api
 
--- Load real systems (no mocks!)
-local persistence = require('nvim-zelda.persistence')
-local learning = require('nvim-zelda.learning_engine')
-local ai_system = require('nvim-zelda.ai_system')
-local logger = require('nvim-zelda.logger')
-local error_handler = require('nvim-zelda.error_handler')
+-- Lazy load modules for performance
+local persistence, learning, ai_system, logger
+
+local function load_modules()
+    if not persistence then
+        persistence = require('nvim-zelda.persistence')
+        learning = require('nvim-zelda.learning_engine')
+        ai_system = require('nvim-zelda.ai_system')
+
+        -- Logger disabled by default for performance
+        logger = {
+            init = function() end,
+            info = function() end,
+            debug = function() end,
+            warn = function() end,
+            error = function() end,
+            log_command = function() end,
+            log_ai = function() end
+        }
+    end
+end
 
 -- Game state
 M.state = {
@@ -107,13 +122,7 @@ function M.setup(opts)
     M.config = vim.tbl_extend("force", M.config, opts or {})
     M.state.ns_id = api.nvim_create_namespace("nvim_zelda")
 
-    -- Initialize logger
-    logger.init({
-        enabled = true,
-        level = logger.levels.DEBUG  -- Capture everything for debugging
-    })
-
-    logger.info("Setup", "Game initialized", { config = M.config })
+    -- Logger disabled by default - use :ZeldaLogs to enable
 
     -- Set up highlight groups for colors
     vim.cmd([[
@@ -134,26 +143,19 @@ function M.start()
         M.setup()
     end
 
-    logger.info("Game", "Starting game session")
+    -- Load modules when game starts
+    load_modules()
 
     if M.state.running then
-        logger.warn("Game", "Attempted to start while already running")
         vim.notify("Game already running!", vim.log.levels.WARN)
         return
     end
 
     -- Initialize real persistence
-    logger.debug("Persistence", "Initializing database")
     if not persistence.init() then
-        logger.error("Persistence", "Failed to initialize database", {
-            db_path = persistence.db_path
-        })
         vim.notify("Failed to initialize database. Check permissions.", vim.log.levels.ERROR)
         return
     end
-    logger.info("Persistence", "Database initialized", {
-        available = persistence.available
-    })
 
     -- Load or create player profile
     local player_data = persistence.get_or_create_player()
@@ -170,18 +172,12 @@ function M.start()
     M.state.player.hp = M.state.player.max_hp
 
     -- Create window and check for errors
-    logger.debug("Window", "Creating game window")
     local window_created = M.create_window()
     if window_created == false then
         M.state.running = false
-        logger.error("Window", "Failed to create game window")
         vim.notify("Failed to create game window. Run :ZeldaHealth for diagnostics.", vim.log.levels.ERROR)
         return
     end
-    logger.info("Window", "Game window created", {
-        buf = M.state.buf,
-        win = M.state.win
-    })
 
     M.generate_room(M.state.current_room)
     M.render()
