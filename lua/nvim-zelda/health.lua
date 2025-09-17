@@ -11,6 +11,28 @@ function M.check()
 
     start('nvim-zelda Health Check')
 
+    -- Check SQLite3 availability
+    local persistence_ok, persistence = pcall(require, 'nvim-zelda.persistence')
+    if persistence_ok and persistence.check_sqlite then
+        if persistence.check_sqlite() then
+            ok('SQLite3 is installed - Progress will be saved')
+        else
+            warn('SQLite3 not found - Game will run but progress won\'t be saved')
+            info('Install SQLite3 for full features:')
+            if vim.fn.has('win32') == 1 then
+                info('  winget install SQLite.SQLite')
+            elseif vim.fn.has('mac') == 1 then
+                info('  brew install sqlite3')
+            else
+                info('  sudo apt-get install sqlite3  # Ubuntu/Debian')
+                info('  sudo dnf install sqlite       # Fedora')
+                info('  sudo pacman -S sqlite         # Arch')
+            end
+        end
+    else
+        warn('Could not check SQLite3 status')
+    end
+
     -- Check Neovim version
     local nvim_version = vim.version()
     if nvim_version.major == 0 and nvim_version.minor < 8 then

@@ -1,13 +1,44 @@
 -- Real Persistence Layer for nvim-zelda
--- No mocks, actual SQLite database implementation
+-- No mocks, actual SQLite database implementation with graceful fallback
 
 local M = {}
 local sqlite = nil
 local db = nil
 local player_id = nil
+M.available = false
+M.in_memory = {}  -- Fallback storage if SQLite not available
+
+-- Check if SQLite3 is available
+function M.check_sqlite()
+    local handle = io.popen('sqlite3 --version 2>&1')
+    if handle then
+        local result = handle:read('*a')
+        handle:close()
+        if result and result:match('%d+%.%d+%.%d+') then
+            return true
+        end
+    end
+    return false
+end
 
 -- Initialize SQLite (using vim.fn.system for now, will integrate lsqlite3 later)
 function M.init()
+    -- Check if SQLite is available
+    if not M.check_sqlite() then
+        vim.notify('⚠️  SQLite3 not found. Progress will not be saved. Install sqlite3 for persistence.', vim.log.levels.WARN)
+        M.available = false
+        -- Initialize in-memory fallback
+        M.in_memory = {
+            player = { id = 1, username = vim.fn.expand('$USER'), level = 1, score = 0 },
+            session = { id = 1, start_time = vim.fn.localtime() },
+            commands = {},
+            achievements = {}
+        }
+        return true  -- Return true so game can still run
+    end
+
+    M.available = true
+
     -- Create real database in Neovim data directory
     local data_path = vim.fn.stdpath('data')
     M.db_path = data_path .. '/nvim-zelda.db'
@@ -99,6 +130,12 @@ end
 function M.get_or_create_player(username)
     username = username or vim.fn.expand('$USER')
 
+    -- Fallback to in-memory if SQLite not available
+    if not M.available then
+        M.in_memory.player.username = username
+        return M.in_memory.player
+    end
+
     -- Check if player exists
     local query = string.format('SELECT id, current_level, total_score FROM players WHERE username = "%s"', username)
     local cmd = string.format('sqlite3 -json "%s" "%s"', M.db_path, query)
@@ -135,6 +172,13 @@ end
 
 -- Start a new game session
 function M.start_session()
+    -- Fallback to in-memory
+    if not M.available then
+        M.in_memory.session.id = (M.in_memory.session.id or 0) + 1
+        M.in_memory.session.start_time = vim.fn.localtime()
+        return M.in_memory.session.id
+    end
+
     if not player_id then
         vim.notify('No player loaded', vim.log.levels.ERROR)
         return nil
@@ -176,6 +220,23 @@ end
 
 -- Track command usage
 function M.track_command(command, success, execution_time, context)
+    -- Fallback to in-memory
+    if not M.available then
+        if not M.in_memory.commands[command] then
+            M.in_memory.commands[command] = {
+                count = 0,
+                successes = 0,
+                total_time = 0
+            }
+        end
+        M.in_memory.commands[command].count = M.in_memory.commands[command].count + 1
+        if success then
+            M.in_memory.commands[command].successes = M.in_memory.commands[command].successes + 1
+        end
+        M.in_memory.commands[command].total_time = M.in_memory.commands[command].total_time + (execution_time or 0)
+        return
+    end
+
     if not M.current_session then return end
 
     -- Record in command history
@@ -265,6 +326,34 @@ end
 
 -- Get player statistics
 function M.get_player_stats()
+    -- Fallback to in-memory
+    if not M.available then
+        local stats = {
+            playtime = vim.fn.localtime() - (M.in_memory.session.start_time or 0),
+            level = M.in_memory.player.level or 1,
+            score = M.in_memory.player.score or 0,
+            achievements = vim.tbl_count(M.in_memory.achievements or {}),
+            top_commands = {}
+        }
+
+        -- Convert commands to top_commands format
+        for cmd, data in pairs(M.in_memory.commands or {}) do
+            local mastery = data.count > 0 and (data.successes / data.count * 100) or 0
+            table.insert(stats.top_commands, {
+                command = cmd,
+                mastery_level = mastery,
+                practice_count = data.count
+            })
+        end
+
+        -- Sort by mastery level
+        table.sort(stats.top_commands, function(a, b)
+            return a.mastery_level > b.mastery_level
+        end)
+
+        return stats
+    end
+
     if not player_id then return {} end
 
     local stats = {}

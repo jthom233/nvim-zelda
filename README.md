@@ -8,15 +8,60 @@ A lightweight, Zelda-inspired game plugin for Neovim that teaches you vim motion
 
 ## ✨ Features
 
+### Core Features (No Dependencies)
 - 🎮 **Learn by Playing**: Master vim commands while playing a fun game
 - 🗺️ **Quest System**: Progressive tutorials teaching vim concepts
 - ⚔️ **Combat System**: Use vim delete commands to defeat enemies
 - 💎 **Item Collection**: Practice yank and put commands
 - 🏃 **Movement Training**: Master hjkl, word jumps, and line navigation
 - 📚 **Teaching Mode**: Get tips and explanations as you play
-- 🎯 **Lightweight**: Minimal dependencies, pure Lua implementation
+- 🤖 **Smart AI**: Enemies with real pathfinding (A* algorithm)
+- 🎯 **Lightweight**: Works without external dependencies
+
+### Enhanced Features (With SQLite3)
+- 💾 **Progress Saving**: Your progress persists between sessions
+- 🏆 **Achievements**: Unlock achievements as you master vim commands
+- 📊 **Analytics Dashboard**: Track your learning progress over time
+- 🥇 **Leaderboards**: Compare your scores with other players
+- 📈 **Command Mastery Tracking**: See which commands you've mastered
+- 🎯 **Personalized Recommendations**: Get suggestions based on your weak areas
 
 ## 📦 Installation
+
+### Prerequisites (Optional but Recommended)
+
+**SQLite3** is optional but recommended for progress tracking, achievements, and leaderboards:
+
+#### Windows
+```powershell
+# Using winget (Windows 11/10)
+winget install SQLite.SQLite
+
+# Using Chocolatey
+choco install sqlite
+
+# Using Scoop
+scoop install sqlite
+```
+
+#### macOS
+```bash
+brew install sqlite3
+```
+
+#### Linux
+```bash
+# Ubuntu/Debian
+sudo apt-get install sqlite3
+
+# Fedora
+sudo dnf install sqlite
+
+# Arch
+sudo pacman -S sqlite
+```
+
+> **Note**: The game works without SQLite but won't save your progress. You'll see a warning on startup if SQLite is not installed.
 
 ### Using [lazy.nvim](https://github.com/folke/lazy.nvim)
 
