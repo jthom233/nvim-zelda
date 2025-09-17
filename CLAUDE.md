@@ -1,1 +1,2 @@
 - Use the framework in c:\users\dr4zz\projects\mlrsa-ng for approaching any development
+- Add any claude related files to ignore, as well as the gitignore file

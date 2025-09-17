@@ -298,7 +298,7 @@ function M.create_window()
 
         -- Change and insert (buffs)
         ['c'] = function() M.change_mode() end,
-        ['i'] = function() M.inventory_toggle() end,
+        ['i'] = function() M.insert_mode() end,
 
         -- Numbers (repeat commands)
         ['1'] = function() M.set_repeat(1) end,
@@ -675,6 +675,177 @@ function M.search_mode()
             M.render()
         end
     end)
+end
+
+-- Missing movement functions
+function M.move_to_line_start()
+    M.state.player.x = 2
+    M.render()
+end
+
+function M.move_to_line_end()
+    M.state.player.x = M.state.map_width - 2
+    M.render()
+end
+
+function M.move_to_top()
+    M.state.player.y = 2
+    M.render()
+end
+
+function M.move_to_bottom()
+    M.state.player.y = M.state.map_height - 2
+    M.render()
+end
+
+-- Delete functions
+function M.delete_word()
+    -- Attack in a wider area
+    local killed = 0
+    for i = #M.state.enemies, 1, -1 do
+        local e = M.state.enemies[i]
+        if math.abs(e.x - M.state.player.x) <= 2 and
+           math.abs(e.y - M.state.player.y) <= 1 then
+            table.remove(M.state.enemies, i)
+            killed = killed + 1
+        end
+    end
+
+    if killed > 0 then
+        vim.notify(string.format("dw: Killed %d enemies!", killed), vim.log.levels.INFO)
+        M.state.player.total_score = (M.state.player.total_score or 0) + (killed * 10)
+    end
+
+    M.check_room_clear()
+    M.render()
+end
+
+function M.delete_to_end()
+    -- Delete all enemies to the right
+    local killed = 0
+    for i = #M.state.enemies, 1, -1 do
+        local e = M.state.enemies[i]
+        if e.y == M.state.player.y and e.x > M.state.player.x then
+            table.remove(M.state.enemies, i)
+            killed = killed + 1
+        end
+    end
+
+    if killed > 0 then
+        vim.notify(string.format("D: Deleted %d enemies to end of line!", killed), vim.log.levels.INFO)
+    end
+
+    M.check_room_clear()
+    M.render()
+end
+
+-- Visual mode
+function M.visual_line_mode()
+    vim.notify("V: Visual line mode - all enemies on this line highlighted", vim.log.levels.INFO)
+    -- Highlight all enemies on the same line
+    for _, enemy in ipairs(M.state.enemies) do
+        if enemy.y == M.state.player.y then
+            enemy.highlighted = true
+        end
+    end
+    M.render()
+end
+
+-- Search functions
+function M.next_search_result()
+    if M.state.search_target then
+        -- Find next enemy matching search
+        for _, enemy in ipairs(M.state.enemies) do
+            if enemy.name and enemy.name:match(M.state.search_target) then
+                vim.notify("n: Next " .. enemy.name .. " at " .. enemy.x .. "," .. enemy.y, vim.log.levels.INFO)
+                enemy.highlighted = true
+                break
+            end
+        end
+        M.render()
+    end
+end
+
+function M.prev_search_result()
+    if M.state.search_target then
+        vim.notify("N: Previous search result", vim.log.levels.INFO)
+    end
+end
+
+-- Yank and paste
+function M.yank_enemy()
+    -- Copy enemy ability
+    for _, enemy in ipairs(M.state.enemies) do
+        if math.abs(enemy.x - M.state.player.x) <= 1 and
+           math.abs(enemy.y - M.state.player.y) <= 1 then
+            M.state.yanked_ability = enemy.name or "enemy"
+            vim.notify("y: Yanked " .. M.state.yanked_ability .. " ability", vim.log.levels.INFO)
+            break
+        end
+    end
+end
+
+function M.paste_ability()
+    if M.state.yanked_ability then
+        vim.notify("p: Pasted " .. M.state.yanked_ability .. " ability", vim.log.levels.INFO)
+        -- Could add special effect here
+    end
+end
+
+-- Other missing functions
+function M.change_word()
+    vim.notify("cw: Change word mode", vim.log.levels.INFO)
+end
+
+function M.insert_mode()
+    vim.notify("i: Insert mode - inventory", vim.log.levels.INFO)
+    M.inventory_toggle()
+end
+
+function M.repeat_command()
+    if M.state.last_command then
+        vim.notify(".: Repeating " .. M.state.last_command, vim.log.levels.INFO)
+    end
+end
+
+function M.undo_action()
+    vim.notify("u: Undo last action", vim.log.levels.INFO)
+end
+
+function M.redo_action()
+    vim.notify("Ctrl-r: Redo", vim.log.levels.INFO)
+end
+
+function M.set_mark()
+    M.state.mark = { x = M.state.player.x, y = M.state.player.y }
+    vim.notify("m: Mark set", vim.log.levels.INFO)
+end
+
+function M.jump_to_mark()
+    if M.state.mark then
+        M.state.player.x = M.state.mark.x
+        M.state.player.y = M.state.mark.y
+        M.render()
+        vim.notify("': Jumped to mark", vim.log.levels.INFO)
+    end
+end
+
+function M.set_repeat(n)
+    M.state.repeat_count = n
+    vim.notify(n .. ": Repeat count set", vim.log.levels.INFO)
+end
+
+function M.command_mode()
+    vim.notify(":command mode - type command", vim.log.levels.INFO)
+end
+
+function M.escape_action()
+    vim.notify("ESC: Cancel action", vim.log.levels.INFO)
+    -- Clear any highlights
+    for _, enemy in ipairs(M.state.enemies) do
+        enemy.highlighted = false
+    end
+    M.render()
 end
 
 -- Inventory with vim-style navigation
