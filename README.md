@@ -155,7 +155,9 @@ nvim-zelda/
 
 If you find this plugin helpful in your Vim learning journey, consider supporting development:
 
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-%23FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/jthom233)
+<a href="https://buymeacoffee.com/jthom233" target="_blank">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50" width="210">
+</a>
 
 Your support helps maintain and improve the plugin with new features, levels, and vim teaching mechanics!
 
