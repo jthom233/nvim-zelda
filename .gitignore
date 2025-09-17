@@ -1,0 +1,21 @@
+# Lua
+*.lua.bak
+
+# Vim
+*.swp
+*.swo
+*~
+.netrwhist
+tags
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+
+# Test artifacts
+test/
+tmp/

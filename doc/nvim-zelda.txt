@@ -1,0 +1,162 @@
+*nvim-zelda.txt*    Learn Vim through a Zelda-inspired game
+
+==============================================================================
+CONTENTS                                                    *nvim-zelda-contents*
+
+1. Introduction .......................... |nvim-zelda-introduction|
+2. Installation .......................... |nvim-zelda-installation|
+3. Commands .............................. |nvim-zelda-commands|
+4. Controls .............................. |nvim-zelda-controls|
+5. Quests ................................ |nvim-zelda-quests|
+6. Configuration ......................... |nvim-zelda-configuration|
+7. Tips .................................. |nvim-zelda-tips|
+
+==============================================================================
+1. INTRODUCTION                                         *nvim-zelda-introduction*
+
+nvim-zelda is a fun, educational game plugin that teaches vim motions and
+commands through gameplay. Navigate dungeons, defeat enemies, and collect
+items while mastering vim navigation!
+
+Features:
+- Progressive quest system teaching vim concepts
+- Combat using vim delete commands
+- Item collection with yank/put
+- Movement training with hjkl and advanced motions
+- Lightweight, pure Lua implementation
+
+==============================================================================
+2. INSTALLATION                                         *nvim-zelda-installation*
+
+Using lazy.nvim: >lua
+  {
+    "jthom233/nvim-zelda",
+    cmd = { "Zelda", "ZeldaStart" },
+    config = function()
+      require("nvim-zelda").setup()
+    end,
+  }
+<
+Using packer.nvim: >lua
+  use {
+    'jthom233/nvim-zelda',
+    config = function()
+      require('nvim-zelda').setup()
+    end
+  }
+<
+==============================================================================
+3. COMMANDS                                                *nvim-zelda-commands*
+
+:Zelda                                                              *:Zelda*
+    Start the game. Opens a floating window with the game world.
+
+:ZeldaStart                                                    *:ZeldaStart*
+    Alternative command to start the game.
+
+:ZeldaQuit                                                      *:ZeldaQuit*
+    Quit the game and close the game window.
+
+==============================================================================
+4. CONTROLS                                                *nvim-zelda-controls*
+
+Movement Commands~
+h            Move left
+j            Move down
+k            Move up
+l            Move right
+w            Jump forward by word (5 spaces)
+b            Jump backward by word (5 spaces)
+gg           Jump to top of map
+G            Jump to bottom of map
+
+Action Commands~
+d            Attack/Delete enemy (when adjacent)
+y            Yank/Collect items
+p            Put/Place items
+/            Start search (tutorial)
+q            Quit game
+
+Game Symbols~
+@            Player (you)
+E            Enemy
+*            Item to collect
+#            Wall
+.            Grass (walkable)
+C            Chest
+K            Key
+D            Door
+
+==============================================================================
+5. QUESTS                                                    *nvim-zelda-quests*
+
+The game includes progressive quests that teach vim concepts:
+
+1. Basic Movement Quest
+   - Learn hjkl navigation
+   - Reward: 50 points
+
+2. Word Jumping Quest
+   - Master w and b movements
+   - Reward: 75 points
+
+3. Line Navigation Quest
+   - Practice gg, G, 0, $
+   - Reward: 100 points
+
+4. Delete Operations Quest
+   - Learn d, dd, dw commands
+   - Reward: 150 points
+
+5. Yank and Put Quest
+   - Master y and p commands
+   - Reward: 125 points
+
+6. Search Commands Quest
+   - Learn /, n, N navigation
+   - Reward: 100 points
+
+==============================================================================
+6. CONFIGURATION                                       *nvim-zelda-configuration*
+
+Setup function accepts these options: >lua
+  require('nvim-zelda').setup({
+    width = 60,           -- Game window width
+    height = 20,          -- Game window height
+    teach_mode = true,    -- Show vim tips while playing
+    difficulty = "normal" -- "easy", "normal", or "hard"
+  })
+<
+Options~
+width        number  Width of game window (default: 60)
+height       number  Height of game window (default: 20)
+teach_mode   boolean Show teaching tips (default: true)
+difficulty   string  Game difficulty (default: "normal")
+
+==============================================================================
+7. TIPS                                                        *nvim-zelda-tips*
+
+For New Vim Users~
+- Start by mastering hjkl before using advanced movements
+- Think in "operators + motions" (like d + w = delete word)
+- Word jumps (w, b) are much faster than repeated h/l
+- Search (/) is often the fastest way to navigate
+- Practice regularly to build muscle memory
+
+Game Tips~
+- Enemies can be defeated when you're adjacent to them
+- Items are collected automatically when you move over them
+- Complete quests in order for best learning progression
+- Pay attention to the vim tips shown after quest completion
+- Use search (/) to quickly find items on the map
+
+Vim Motion Combinations~
+dw    Delete word
+dd    Delete line
+yy    Yank line
+yw    Yank word
+d$    Delete to end of line
+y0    Yank to beginning of line
+
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:
