@@ -46,13 +46,13 @@ M.state = {
 
     -- Map dimensions
     map_width = 70,
-    map_height = 24
+    map_height = 20
 }
 
 -- Configuration
 M.config = {
     width = 80,
-    height = 30,
+    height = 28,  -- Reduced to fit map + HUD
     teach_mode = true
 }
 
@@ -136,6 +136,10 @@ function M.create_window()
     vim.api.nvim_buf_set_option(M.state.buf, 'buftype', 'nofile')
     vim.api.nvim_buf_set_option(M.state.buf, 'bufhidden', 'wipe')
     vim.api.nvim_buf_set_option(M.state.buf, 'swapfile', false)
+    vim.api.nvim_buf_set_option(M.state.buf, 'modifiable', false)
+    vim.api.nvim_buf_set_option(M.state.buf, 'cursorline', false)
+    vim.api.nvim_win_set_option(M.state.win, 'wrap', false)
+    vim.api.nvim_win_set_option(M.state.win, 'scrolloff', 0)
 
     local width = M.config.width
     local height = M.config.height
@@ -699,9 +703,8 @@ function M.render()
         table.insert(lines, line)
     end
 
-    -- HUD
-    table.insert(lines, "")
-    table.insert(lines, "═══════════════════════════════════════════════════════════════════════════════")
+    -- HUD separator
+    table.insert(lines, string.rep("═", 80))
 
     -- Health bar with color
     local hp_percent = M.state.player.hp / M.state.player.max_hp
@@ -709,39 +712,54 @@ function M.render()
     local hp_filled = math.floor(hp_bar_length * hp_percent)
     local hp_empty = hp_bar_length - hp_filled
 
-    local hp_color = "🟩"
-    if hp_percent <= 0.25 then
-        hp_color = "🟥"
-    elseif hp_percent <= 0.5 then
-        hp_color = "🟨"
+    -- Use ASCII characters for better visibility
+    local hp_bar = ""
+    for i = 1, hp_bar_length do
+        if i <= hp_filled then
+            if hp_percent > 0.5 then
+                hp_bar = hp_bar .. "█"  -- Full block for high health
+            elseif hp_percent > 0.25 then
+                hp_bar = hp_bar .. "▓"  -- Medium block for mid health
+            else
+                hp_bar = hp_bar .. "▒"  -- Light block for low health
+            end
+        else
+            hp_bar = hp_bar .. "░"  -- Empty block
+        end
     end
 
-    local hp_bar = string.rep(hp_color, hp_filled) .. string.rep("⬜", hp_empty)
+    -- Main HUD line with HP bar
+    local hud_line = string.format("HP: %d/%d [%s] | 💰%d 🔑%d | Room %d | 👹%d",
+        M.state.player.hp, M.state.player.max_hp, hp_bar,
+        M.state.player.coins, M.state.player.keys,
+        M.state.current_room, #M.state.enemies)
+    table.insert(lines, hud_line)
 
-    table.insert(lines, string.format("HP: %d/%d [%s] | 💰 %d | 🔑 %d | Room: %d | Enemies: %d",
-                                     M.state.player.hp, M.state.player.max_hp, hp_bar,
-                                     M.state.player.coins, M.state.player.keys,
-                                     M.state.current_room, #M.state.enemies))
-
-    -- Vim combo display
-    if #M.state.combo_buffer > 0 then
-        table.insert(lines, "Combo: " .. M.state.combo_buffer:sub(-20))
-    end
-
-    -- Room status
+    -- Room status and combo on same line
     local template = M.room_templates[math.min(M.state.current_room, #M.room_templates)]
-    table.insert(lines, "Lesson: " .. template.vim_lesson .. (M.state.room_cleared and " ✅" or " ⏳"))
+    local status_line = "Lesson: " .. template.vim_lesson .. (M.state.room_cleared and " ✅" or " ⏳")
+    if #M.state.combo_buffer > 0 then
+        status_line = status_line .. " | Combo: " .. M.state.combo_buffer:sub(-10)
+    end
+    table.insert(lines, status_line)
 
-    -- Controls
-    table.insert(lines, "Vim Commands: hjkl=move | w/b=jump | x/dd=attack | /=search | i=inventory | ?=help")
+    -- Compact controls
+    table.insert(lines, "[hjkl:move] [w/b:jump] [x/dd:attack] [/:search] [i:inv] [?:help] [q:quit]")
 
-    -- Update buffer
+    -- Ensure buffer shows all content
+    while #lines < M.config.height do
+        table.insert(lines, "")
+    end
+
+    -- Update buffer with modifiable temporarily
+    vim.api.nvim_buf_set_option(M.state.buf, 'modifiable', true)
     api.nvim_buf_set_lines(M.state.buf, 0, -1, false, lines)
+    vim.api.nvim_buf_set_option(M.state.buf, 'modifiable', false)
 
-    -- Add highlights for HP bar
-    if M.state.ns_id then
-        local hp_line = #lines - 3
-        vim.api.nvim_buf_add_highlight(M.state.buf, M.state.ns_id, "ZeldaHealth", hp_line, 0, 10)
+    -- Ensure window shows the game area
+    if M.state.win and api.nvim_win_is_valid(M.state.win) then
+        -- Set cursor to player position to keep view centered
+        pcall(api.nvim_win_set_cursor, M.state.win, {M.state.player.y, M.state.player.x})
     end
 end
 
