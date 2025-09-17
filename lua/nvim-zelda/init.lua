@@ -322,6 +322,83 @@ function M.create_window()
         ['<Esc>'] = function() M.escape_action() end
     }
 
+    M.create_window_keymaps(keymaps)
+    return true  -- Success
+end
+
+-- Setup keymaps (extracted for reuse)
+function M.create_window_keymaps(custom_keymaps)
+    if not M.state.buf or not api.nvim_buf_is_valid(M.state.buf) then
+        return
+    end
+
+    local keymaps = custom_keymaps or {
+        -- Basic movement
+        ['h'] = function() M.move_player(-1, 0, 'h') end,
+        ['j'] = function() M.move_player(0, 1, 'j') end,
+        ['k'] = function() M.move_player(0, -1, 'k') end,
+        ['l'] = function() M.move_player(1, 0, 'l') end,
+
+        -- Word movement (jumps)
+        ['w'] = function() M.word_jump(5, 'w') end,
+        ['b'] = function() M.word_jump(-5, 'b') end,
+        ['e'] = function() M.word_jump(3, 'e') end,
+
+        -- Line movement
+        ['0'] = function() M.move_to_line_start() end,
+        ['$'] = function() M.move_to_line_end() end,
+        ['gg'] = function() M.move_to_top() end,
+        ['G'] = function() M.move_to_bottom() end,
+
+        -- Delete commands (attacks)
+        ['x'] = function() M.delete_char() end,
+        ['dd'] = function() M.delete_line() end,
+        ['dw'] = function() M.delete_word() end,
+        ['D'] = function() M.delete_to_end() end,
+
+        -- Visual mode
+        ['v'] = function() M.enter_visual_mode() end,
+        ['V'] = function() M.visual_line_mode() end,
+
+        -- Search
+        ['/'] = function() M.search_mode() end,
+        ['n'] = function() M.next_search_result() end,
+        ['N'] = function() M.prev_search_result() end,
+
+        -- Yank and paste (special abilities)
+        ['y'] = function() M.yank_enemy() end,
+        ['p'] = function() M.paste_ability() end,
+
+        -- Change and insert (buffs)
+        ['c'] = function() M.change_mode() end,
+        ['i'] = function() M.insert_mode() end,
+
+        -- Numbers (repeat commands)
+        ['1'] = function() M.set_repeat(1) end,
+        ['2'] = function() M.set_repeat(2) end,
+        ['3'] = function() M.set_repeat(3) end,
+        ['4'] = function() M.set_repeat(4) end,
+        ['5'] = function() M.set_repeat(5) end,
+        ['6'] = function() M.set_repeat(6) end,
+        ['7'] = function() M.set_repeat(7) end,
+        ['8'] = function() M.set_repeat(8) end,
+        ['9'] = function() M.set_repeat(9) end,
+
+        -- Marks
+        ['m'] = function() M.set_mark() end,
+        ["'"] = function() M.jump_to_mark() end,
+
+        -- Undo/Redo
+        ['u'] = function() M.undo_action() end,
+        ['<C-r>'] = function() M.redo_action() end,
+
+        -- Game controls
+        ['?'] = function() M.show_help() end,
+        [':'] = function() M.command_mode() end,
+        ['q'] = function() M.quit() end,
+        ['<Esc>'] = function() M.escape_action() end
+    }
+
     for key, func in pairs(keymaps) do
         vim.api.nvim_buf_set_keymap(M.state.buf, 'n', key, '', {
             callback = func,
@@ -329,8 +406,6 @@ function M.create_window()
             silent = true
         })
     end
-
-    return true  -- Success
 end
 
 -- Generate interesting room layouts
@@ -503,14 +578,21 @@ end
 
 -- Move player with vim training
 function M.move_player(dx, dy, key)
+    -- Apply repeat count
+    local repeat_count = M.state.repeat_count or 1
+    dx = dx * repeat_count
+    dy = dy * repeat_count
+    M.state.repeat_count = nil  -- Reset after use
+
     -- Log movement attempt
-    logger.debug("Movement", string.format("Player move: %s", key), {
+    logger.debug("Movement", string.format("Player move: %s (x%d)", key, repeat_count), {
         from = { x = M.state.player.x, y = M.state.player.y },
-        delta = { dx = dx, dy = dy }
+        delta = { dx = dx, dy = dy },
+        repeat_count = repeat_count
     })
     -- Track command
     M.state.last_command = key
-    M.state.combo_buffer = M.state.combo_buffer .. key
+    M.state.combo_buffer = (M.state.combo_buffer or "") .. key
 
     local new_x = M.state.player.x + dx
     local new_y = M.state.player.y + dy
@@ -584,6 +666,11 @@ end
 
 -- Word jump (w/b commands) - REAL IMPLEMENTATION
 function M.word_jump(distance, key)
+    -- Apply repeat count
+    local repeat_count = M.state.repeat_count or 1
+    distance = distance * repeat_count
+    M.state.repeat_count = nil  -- Reset after use
+
     -- Initialize combo buffer if not exists
     M.state.combo_buffer = (M.state.combo_buffer or "") .. key
 
@@ -815,7 +902,9 @@ function M.change_word()
 end
 
 function M.insert_mode()
-    -- Don't just notify - actually show inventory
+    -- Reset repeat count when entering inventory
+    M.state.repeat_count = nil
+    -- Actually show inventory
     M.inventory_toggle()
 end
 
@@ -870,36 +959,101 @@ function M.inventory_toggle()
     M.state.inventory_open = not M.state.inventory_open
 
     if M.state.inventory_open then
+        -- Setup inventory keybindings
+        vim.api.nvim_buf_set_keymap(M.state.buf, 'n', 'j', '', {
+            callback = function()
+                if M.state.selected_slot < #M.state.inventory then
+                    M.state.selected_slot = M.state.selected_slot + 1
+                    M.show_inventory()
+                end
+            end,
+            noremap = true,
+            silent = true
+        })
+        vim.api.nvim_buf_set_keymap(M.state.buf, 'n', 'k', '', {
+            callback = function()
+                if M.state.selected_slot > 1 then
+                    M.state.selected_slot = M.state.selected_slot - 1
+                    M.show_inventory()
+                end
+            end,
+            noremap = true,
+            silent = true
+        })
+        vim.api.nvim_buf_set_keymap(M.state.buf, 'n', '<CR>', '', {
+            callback = function()
+                if M.state.inventory[M.state.selected_slot] then
+                    local item = M.state.inventory[M.state.selected_slot]
+                    vim.notify("Used " .. item.name .. "!", vim.log.levels.INFO)
+                    table.remove(M.state.inventory, M.state.selected_slot)
+                    if M.state.selected_slot > #M.state.inventory and M.state.selected_slot > 1 then
+                        M.state.selected_slot = M.state.selected_slot - 1
+                    end
+                    M.show_inventory()
+                end
+            end,
+            noremap = true,
+            silent = true
+        })
         M.show_inventory()
     else
+        -- Restore window title
+        if M.state.win and api.nvim_win_is_valid(M.state.win) then
+            api.nvim_win_set_config(M.state.win, {
+                title = ' ⚔️ Vim Training: Room ' .. M.state.current_room .. ' ⚔️ ',
+                title_pos = 'center'
+            })
+        end
+        -- Re-setup game keymaps
+        M.create_window_keymaps()
         M.render()
     end
 end
 
 function M.show_inventory()
-    local lines = {"", "=== INVENTORY (j/k to select, Enter to use, i to close) ===", ""}
+    if not M.state.buf or not api.nvim_buf_is_valid(M.state.buf) then
+        return
+    end
+
+    -- Update window title for inventory
+    if M.state.win and api.nvim_win_is_valid(M.state.win) then
+        api.nvim_win_set_config(M.state.win, {
+            title = ' 🎒 INVENTORY 🎒 ',
+            title_pos = 'center'
+        })
+    end
+
+    local lines = {}
+
+    -- Add some spacing at top
+    for _ = 1, 3 do table.insert(lines, "") end
+
+    -- Header
+    table.insert(lines, "╔══════════════════════════════════════════════╗")
+    table.insert(lines, "║         INVENTORY - Press 'i' to close       ║")
+    table.insert(lines, "╠══════════════════════════════════════════════╣")
 
     if #M.state.inventory == 0 then
-        table.insert(lines, "  Empty - collect items!")
+        table.insert(lines, "║    Empty - Collect items to survive!        ║")
     else
+        table.insert(lines, "║  Use j/k to select, Enter to use item       ║")
+        table.insert(lines, "╠══════════════════════════════════════════════╣")
         for i, item in ipairs(M.state.inventory) do
-            local prefix = i == M.state.selected_slot and "> " or "  "
-            table.insert(lines, prefix .. item.sprite .. " " .. item.name)
+            local prefix = i == M.state.selected_slot and "║ ▶ " or "║   "
+            local item_line = string.format("%s%s %-20s", prefix, item.sprite or "?", item.name or "Unknown")
+            -- Pad to box width
+            item_line = item_line .. string.rep(" ", 47 - vim.fn.strdisplaywidth(item_line)) .. "║"
+            table.insert(lines, item_line)
         end
     end
 
-    table.insert(lines, "")
-    table.insert(lines, "Coins: " .. M.state.player.coins)
-    table.insert(lines, "Keys: " .. M.state.player.keys)
+    table.insert(lines, "╠══════════════════════════════════════════════╣")
+    table.insert(lines, string.format("║  💰 Coins: %-5d  🗝️  Keys: %-5d         ║",
+        M.state.player.coins or 0, M.state.player.keys or 0))
+    table.insert(lines, "╚══════════════════════════════════════════════╝")
 
-    -- Show in buffer
-    local buf_lines = {}
-    for _ = 1, 5 do table.insert(buf_lines, "") end
-    for _, line in ipairs(lines) do
-        table.insert(buf_lines, line)
-    end
-
-    api.nvim_buf_set_lines(M.state.buf, 0, #lines + 5, false, buf_lines)
+    -- Clear buffer and show inventory
+    api.nvim_buf_set_lines(M.state.buf, 0, -1, false, lines)
 end
 
 -- Pickup items
