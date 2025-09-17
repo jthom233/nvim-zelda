@@ -6,6 +6,8 @@ local api = vim.api
 local persistence = require('nvim-zelda.persistence')
 local learning = require('nvim-zelda.learning_engine')
 local ai_system = require('nvim-zelda.ai_system')
+local logger = require('nvim-zelda.logger')
+local error_handler = require('nvim-zelda.error_handler')
 
 -- Game state
 M.state = {
@@ -105,6 +107,14 @@ function M.setup(opts)
     M.config = vim.tbl_extend("force", M.config, opts or {})
     M.state.ns_id = api.nvim_create_namespace("nvim_zelda")
 
+    -- Initialize logger
+    logger.init({
+        enabled = true,
+        level = logger.levels.DEBUG  -- Capture everything for debugging
+    })
+
+    logger.info("Setup", "Game initialized", { config = M.config })
+
     -- Set up highlight groups for colors
     vim.cmd([[
         highlight ZeldaHealth guifg=#ff0000 ctermfg=Red
@@ -124,16 +134,26 @@ function M.start()
         M.setup()
     end
 
+    logger.info("Game", "Starting game session")
+
     if M.state.running then
+        logger.warn("Game", "Attempted to start while already running")
         vim.notify("Game already running!", vim.log.levels.WARN)
         return
     end
 
     -- Initialize real persistence
+    logger.debug("Persistence", "Initializing database")
     if not persistence.init() then
+        logger.error("Persistence", "Failed to initialize database", {
+            db_path = persistence.db_path
+        })
         vim.notify("Failed to initialize database. Check permissions.", vim.log.levels.ERROR)
         return
     end
+    logger.info("Persistence", "Database initialized", {
+        available = persistence.available
+    })
 
     -- Load or create player profile
     local player_data = persistence.get_or_create_player()
@@ -150,15 +170,26 @@ function M.start()
     M.state.player.hp = M.state.player.max_hp
 
     -- Create window and check for errors
+    logger.debug("Window", "Creating game window")
     local window_created = M.create_window()
     if window_created == false then
         M.state.running = false
+        logger.error("Window", "Failed to create game window")
         vim.notify("Failed to create game window. Run :ZeldaHealth for diagnostics.", vim.log.levels.ERROR)
         return
     end
+    logger.info("Window", "Game window created", {
+        buf = M.state.buf,
+        win = M.state.win
+    })
 
     M.generate_room(M.state.current_room)
     M.render()
+
+    logger.info("Game", "Game started successfully", {
+        room = M.state.current_room,
+        player_id = M.state.player.id
+    })
 
     vim.notify("🎮 Welcome to Vim Training! Room 1: " .. M.room_templates[1].hint, vim.log.levels.INFO)
 end
@@ -216,7 +247,12 @@ function M.create_window()
     -- Set window options after window is created with error handling
     local win_options = {
         wrap = false,
-        scrolloff = 0
+        scrolloff = 0,
+        cursorline = false,
+        cursorcolumn = false,
+        number = false,
+        relativenumber = false,
+        signcolumn = 'no'
     }
 
     for option, value in pairs(win_options) do
@@ -471,6 +507,11 @@ end
 
 -- Move player with vim training
 function M.move_player(dx, dy, key)
+    -- Log movement attempt
+    logger.debug("Movement", string.format("Player move: %s", key), {
+        from = { x = M.state.player.x, y = M.state.player.y },
+        delta = { dx = dx, dy = dy }
+    })
     -- Track command
     M.state.last_command = key
     M.state.combo_buffer = M.state.combo_buffer .. key
@@ -481,6 +522,7 @@ function M.move_player(dx, dy, key)
     -- Check bounds
     if new_x < 2 or new_x > M.state.map_width - 1 or
        new_y < 2 or new_y > M.state.map_height - 1 then
+        logger.debug("Movement", "Move blocked by bounds")
         return
     end
 
@@ -495,6 +537,11 @@ function M.move_player(dx, dy, key)
     for _, enemy in ipairs(M.state.enemies) do
         if enemy.x == new_x and enemy.y == new_y then
             M.state.player.hp = M.state.player.hp - 5
+            logger.info("Combat", "Player collided with enemy", {
+                enemy_type = enemy.type,
+                damage = 5,
+                player_hp = M.state.player.hp
+            })
             vim.notify("Ouch! -5 HP", vim.log.levels.WARN)
             return
         end
@@ -900,10 +947,15 @@ function M.render()
     api.nvim_buf_set_lines(M.state.buf, 0, -1, false, lines)
     vim.api.nvim_buf_set_option(M.state.buf, 'modifiable', false)
 
-    -- Ensure window shows the game area
+    -- Hide the real cursor - we only want the @ character visible
     if M.state.win and api.nvim_win_is_valid(M.state.win) then
-        -- Set cursor to player position to keep view centered
-        pcall(api.nvim_win_set_cursor, M.state.win, {M.state.player.y, M.state.player.x})
+        -- Hide cursor by setting it off-screen or to a fixed position
+        -- Don't follow the player - that creates double cursor
+        pcall(api.nvim_win_set_cursor, M.state.win, {1, 1})
+
+        -- Set cursor to be invisible in the game window
+        vim.api.nvim_win_set_option(M.state.win, 'cursorline', false)
+        vim.api.nvim_win_set_option(M.state.win, 'cursorcolumn', false)
     end
 end
 

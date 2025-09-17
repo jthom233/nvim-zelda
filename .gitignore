@@ -19,3 +19,7 @@ Thumbs.db
 # Test artifacts
 test/
 tmp/
+
+# CLAUDE files (user instructions)
+CLAUDE.md
+.claude/
