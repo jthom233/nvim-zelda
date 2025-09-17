@@ -1,0 +1,1 @@
+- Use the framework in c:\users\dr4zz\projects\mlrsa-ng for approaching any development
