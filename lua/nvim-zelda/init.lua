@@ -114,6 +114,11 @@ end
 
 -- Start game
 function M.start()
+    -- Ensure setup has been called
+    if not M.state.ns_id then
+        M.setup()
+    end
+
     if M.state.running then
         vim.notify("Game already running!", vim.log.levels.WARN)
         return
@@ -123,7 +128,14 @@ function M.start()
     M.state.current_room = 1
     M.state.player.hp = M.state.player.max_hp
 
-    M.create_window()
+    -- Create window and check for errors
+    local window_created = M.create_window()
+    if window_created == false then
+        M.state.running = false
+        vim.notify("Failed to create game window. Run :ZeldaHealth for diagnostics.", vim.log.levels.ERROR)
+        return
+    end
+
     M.generate_room(M.state.current_room)
     M.render()
 
@@ -132,21 +144,37 @@ end
 
 -- Create window
 function M.create_window()
-    M.state.buf = api.nvim_create_buf(false, true)
-    vim.api.nvim_buf_set_option(M.state.buf, 'buftype', 'nofile')
-    vim.api.nvim_buf_set_option(M.state.buf, 'bufhidden', 'wipe')
-    vim.api.nvim_buf_set_option(M.state.buf, 'swapfile', false)
-    vim.api.nvim_buf_set_option(M.state.buf, 'modifiable', false)
-    vim.api.nvim_buf_set_option(M.state.buf, 'cursorline', false)
-    vim.api.nvim_win_set_option(M.state.win, 'wrap', false)
-    vim.api.nvim_win_set_option(M.state.win, 'scrolloff', 0)
+    -- Create buffer with error handling
+    local ok, buf = pcall(api.nvim_create_buf, false, true)
+    if not ok then
+        vim.notify('Failed to create buffer: ' .. tostring(buf), vim.log.levels.ERROR)
+        return false
+    end
+    M.state.buf = buf
+
+    -- Set buffer options with safe API calls
+    local buf_options = {
+        buftype = 'nofile',
+        bufhidden = 'wipe',
+        swapfile = false,
+        modifiable = false,
+        cursorline = false
+    }
+
+    for option, value in pairs(buf_options) do
+        local opt_ok, opt_err = pcall(vim.api.nvim_buf_set_option, M.state.buf, option, value)
+        if not opt_ok then
+            vim.notify('Failed to set buffer option ' .. option .. ': ' .. tostring(opt_err), vim.log.levels.WARN)
+        end
+    end
 
     local width = M.config.width
     local height = M.config.height
     local row = math.floor((vim.o.lines - height) / 2)
     local col = math.floor((vim.o.columns - width) / 2)
 
-    M.state.win = api.nvim_open_win(M.state.buf, true, {
+    -- Create window with error handling
+    local win_ok, win = pcall(api.nvim_open_win, M.state.buf, true, {
         relative = 'editor',
         row = row,
         col = col,
@@ -157,6 +185,25 @@ function M.create_window()
         title = ' ⚔️ Vim Training: Room ' .. M.state.current_room .. ' ⚔️ ',
         title_pos = 'center'
     })
+
+    if not win_ok then
+        vim.notify('Failed to create window: ' .. tostring(win), vim.log.levels.ERROR)
+        return false
+    end
+    M.state.win = win
+
+    -- Set window options after window is created with error handling
+    local win_options = {
+        wrap = false,
+        scrolloff = 0
+    }
+
+    for option, value in pairs(win_options) do
+        local wopt_ok, wopt_err = pcall(vim.api.nvim_win_set_option, M.state.win, option, value)
+        if not wopt_ok then
+            vim.notify('Failed to set window option ' .. option .. ': ' .. tostring(wopt_err), vim.log.levels.WARN)
+        end
+    end
 
     -- Set up ALL vim-like keybindings
     local keymaps = {
@@ -229,6 +276,8 @@ function M.create_window()
             silent = true
         })
     end
+
+    return true  -- Success
 end
 
 -- Generate interesting room layouts
