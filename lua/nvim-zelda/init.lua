@@ -1,6 +1,11 @@
--- nvim-zelda: Vim Training Edition
+-- nvim-zelda: Vim Training Edition with MLRSA-NG Real Implementations
 local M = {}
 local api = vim.api
+
+-- Load real systems (no mocks!)
+local persistence = require('nvim-zelda.persistence')
+local learning = require('nvim-zelda.learning_engine')
+local ai_system = require('nvim-zelda.ai_system')
 
 -- Game state
 M.state = {
@@ -123,6 +128,22 @@ function M.start()
         vim.notify("Game already running!", vim.log.levels.WARN)
         return
     end
+
+    -- Initialize real persistence
+    if not persistence.init() then
+        vim.notify("Failed to initialize database. Check permissions.", vim.log.levels.ERROR)
+        return
+    end
+
+    -- Load or create player profile
+    local player_data = persistence.get_or_create_player()
+    M.state.player.level = player_data.level
+    M.state.player.total_score = player_data.score
+    M.state.player.id = player_data.id
+
+    -- Start game session
+    M.state.session_id = persistence.start_session()
+    M.state.session_start = vim.fn.localtime()
 
     M.state.running = true
     M.state.current_room = 1
@@ -308,28 +329,34 @@ function M.generate_room(room_num)
         M.generate_basic_room()
     end
 
-    -- Add enemies based on template
-    for i = 1, template.enemies do
-        local enemy_types = {
-            {sprite = "🦇", name = "bat", hp = 10, pattern = "flying"},
-            {sprite = "👾", name = "slime", hp = 20, pattern = "crawling"},
-            {sprite = "💀", name = "skeleton", hp = 30, pattern = "walking"},
-            {sprite = "🕷️", name = "spider", hp = 15, pattern = "jumping"}
-        }
-        local enemy_type = enemy_types[math.random(#enemy_types)]
+    -- Add enemies with REAL AI based on room difficulty
+    local enemy_types_by_room = {
+        [1] = { "goblin" },
+        [2] = { "goblin", "skeleton" },
+        [3] = { "skeleton", "orc" },
+        [4] = { "orc", "guard" },
+        [5] = { "guard", "boss" }
+    }
 
-        table.insert(M.state.enemies, {
-            x = math.random(10, M.state.map_width - 10),
-            y = math.random(5, M.state.map_height - 5),
-            sprite = enemy_type.sprite,
-            name = enemy_type.name,
-            hp = enemy_type.hp,
-            pattern = enemy_type.pattern,
-            highlighted = false
-        })
+    local available_types = enemy_types_by_room[math.min(room_num, 5)]
+
+    for i = 1, template.enemies do
+        -- Deterministic enemy placement using room number and index
+        local type_index = ((room_num + i - 1) % #available_types) + 1
+        local enemy_type = available_types[type_index]
+
+        -- Use golden ratio for better distribution
+        local golden_ratio = 1.618033988749895
+        local x = math.floor((i * golden_ratio * 7) % (M.state.map_width - 20)) + 10
+        local y = math.floor((i * golden_ratio * 11) % (M.state.map_height - 10)) + 5
+
+        -- Create enemy with real AI
+        local enemy = ai_system.create_enemy(enemy_type, x, y)
+        enemy.id = i
+        table.insert(M.state.enemies, enemy)
     end
 
-    -- Add items
+    -- Add items deterministically based on room
     local item_types = {
         {sprite = "❤️", name = "heart", type = "health"},
         {sprite = "💰", name = "coin", type = "currency"},
@@ -339,11 +366,22 @@ function M.generate_room(room_num)
         {sprite = "📜", name = "scroll", type = "vim_power"}
     }
 
-    for i = 1, math.random(3, 6) do
-        local item = item_types[math.random(#item_types)]
+    -- Deterministic item count based on room number
+    local item_count = 3 + (room_num % 4)
+
+    for i = 1, item_count do
+        local item_index = ((room_num * 3 + i - 1) % #item_types) + 1
+        local item = item_types[item_index]
+
+        -- Fibonacci sequence for item placement
+        local fib_a, fib_b = 1, 1
+        for j = 1, i do
+            fib_a, fib_b = fib_b, fib_a + fib_b
+        end
+
         table.insert(M.state.items, {
-            x = math.random(5, M.state.map_width - 5),
-            y = math.random(3, M.state.map_height - 3),
+            x = (fib_a * 7) % (M.state.map_width - 10) + 5,
+            y = (fib_b * 5) % (M.state.map_height - 6) + 3,
             sprite = item.sprite,
             name = item.name,
             type = item.type
@@ -522,6 +560,11 @@ function M.word_jump(distance, key)
         vim.notify("Word jump with '" .. key .. "'!", vim.log.levels.INFO)
     end
 
+    -- Track with real systems
+    local execution_time = (vim.loop.hrtime() - start_time) / 1e9
+    learning.track_command(key, safe, execution_time, "word_jump")
+    persistence.track_command(key, safe, execution_time, "word_jump")
+
     M.render()
 end
 
@@ -675,11 +718,63 @@ function M.next_room()
     M.render()
 end
 
+-- Update AI enemies
+function M.update_enemies()
+    if not M.state.enemies then return end
+
+    local obstacles = M.state.obstacles or {}
+    local dt = 0.1 -- Fixed timestep for now
+
+    for _, enemy in ipairs(M.state.enemies) do
+        if enemy.behavior then
+            -- Get AI decision
+            local move = enemy.behavior:update(enemy, M.state.player, obstacles, dt)
+
+            -- Apply movement if valid
+            if move and move.dx then
+                local new_x = enemy.x + move.dx
+                local new_y = enemy.y + move.dy
+
+                -- Check bounds
+                if new_x >= 2 and new_x <= M.state.map_width - 1 and
+                   new_y >= 2 and new_y <= M.state.map_height - 1 then
+                    -- Check collision with obstacles
+                    local blocked = false
+                    for _, obs in ipairs(obstacles) do
+                        if obs.solid and obs.x == new_x and obs.y == new_y then
+                            blocked = true
+                            break
+                        end
+                    end
+
+                    -- Check collision with other enemies
+                    if not blocked then
+                        for _, other in ipairs(M.state.enemies) do
+                            if other ~= enemy and other.x == new_x and other.y == new_y then
+                                blocked = true
+                                break
+                            end
+                        end
+                    end
+
+                    if not blocked then
+                        enemy.x = new_x
+                        enemy.y = new_y
+                    end
+                end
+            end
+        end
+    end
+end
+
 -- Render with colors
 function M.render()
     if not M.state.buf or not api.nvim_buf_is_valid(M.state.buf) then
         return
     end
+
+    -- Update AI before rendering
+    M.update_enemies()
 
     local lines = {}
 
@@ -859,10 +954,36 @@ function M.quit()
         api.nvim_buf_delete(M.state.buf, {force = true})
     end
 
-    -- Show learned commands
+    -- Save progress to database
+    if M.state.session_id then
+        local session_duration = vim.fn.localtime() - (M.state.session_start or 0)
+        persistence.end_session({
+            duration = session_duration,
+            commands_used = vim.tbl_count(M.state.player.learned_commands),
+            enemies_defeated = M.state.enemies_defeated or 0,
+            rooms_cleared = M.state.current_room - 1,
+            score = M.state.player.total_score or 0
+        })
+
+        persistence.save_game_state({
+            level = M.state.current_room,
+            score = M.state.player.total_score or 0
+        })
+    end
+
+    -- Show learned commands and stats
     local learned = vim.tbl_keys(M.state.player.learned_commands)
     if #learned > 0 then
         vim.notify("Vim commands learned: " .. table.concat(learned, ", "), vim.log.levels.INFO)
+    end
+
+    -- Show session stats
+    local stats = persistence.get_player_stats()
+    if stats then
+        vim.notify(string.format("📊 Session Stats: Level %d | Score %d | %d Achievements",
+            stats.level or 1,
+            stats.score or 0,
+            stats.achievements or 0), vim.log.levels.INFO)
     end
 
     vim.notify("Thanks for training! You reached room " .. M.state.current_room, vim.log.levels.INFO)

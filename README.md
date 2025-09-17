@@ -151,6 +151,14 @@ nvim-zelda/
 2. New commands: Add to `setup_mappings()` function
 3. New quests: Add to `quests.lua`
 
+## ☕ Support
+
+If you find this plugin helpful in your Vim learning journey, consider supporting development:
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-%23FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/jthom233)
+
+Your support helps maintain and improve the plugin with new features, levels, and vim teaching mechanics!
+
 ## 🤝 Contributing
 
 Contributions are welcome! Feel free to:
