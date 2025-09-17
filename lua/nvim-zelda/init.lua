@@ -1,64 +1,113 @@
-
--- nvim-zelda Core: Streamlined gameplay-focused version
+-- nvim-zelda: Robust version with fallbacks
 local M = {}
 local api = vim.api
 
--- Load core systems
-M.health = require("nvim-zelda.systems.health")
-M.items = require("nvim-zelda.systems.items")
-M.quests = require("nvim-zelda.systems.quests")
+-- Safe module loading with fallbacks
+local function safe_require(module_name)
+    local ok, module = pcall(require, module_name)
+    if ok then
+        return module
+    else
+        vim.notify("Warning: Failed to load " .. module_name .. ": " .. tostring(module), vim.log.levels.WARN)
+        return nil
+    end
+end
 
--- Game state (no save/load)
+-- Try to load systems with fallbacks
+M.health = safe_require("nvim-zelda.systems.health")
+M.items = safe_require("nvim-zelda.systems.items")
+M.quests = safe_require("nvim-zelda.systems.quests")
+
+-- Fallback to simple version if systems fail
+if not M.health or not M.items or not M.quests then
+    vim.notify("Loading simple version without advanced systems", vim.log.levels.INFO)
+
+    -- Simple fallback implementations
+    M.health = {
+        state = { current_hp = 100, max_hp = 100 },
+        init = function() end,
+        take_damage = function(self, amount)
+            self.state.current_hp = math.max(0, self.state.current_hp - amount)
+            return { message = "-" .. amount .. " HP", remaining_hp = self.state.current_hp }
+        end,
+        heal = function(self, amount)
+            self.state.current_hp = math.min(self.state.max_hp, self.state.current_hp + amount)
+            return { message = "+" .. amount .. " HP" }
+        end,
+        get_display = function(self)
+            return {
+                text = "HP: " .. self.state.current_hp .. "/" .. self.state.max_hp,
+                hp_percent = self.state.current_hp / self.state.max_hp
+            }
+        end
+    }
+
+    M.items = {
+        inventory = { slots = {} },
+        database = {
+            { id = "potion", name = "Potion", sprite = "🧪", drop_rate = 0.3 }
+        },
+        init = function() end,
+        add_to_inventory = function(self, item)
+            table.insert(self.inventory.slots, item)
+            return true
+        end,
+        generate_drop = function() return {} end,
+        get_inventory_display = function()
+            return "Inventory: Basic mode"
+        end,
+        use_item = function()
+            return true, "Item used"
+        end
+    }
+
+    M.quests = {
+        active = { main = nil },
+        init = function() end,
+        update_progress = function() end,
+        get_quest_display = function()
+            return "Quests: Basic mode"
+        end
+    }
+end
+
+-- Game state
 M.state = {
-    -- Core
     running = false,
     buf = nil,
     win = nil,
     ns_id = nil,
 
-    -- Player
     player = {
         x = 10,
         y = 10,
         level = 1,
         xp = 0,
-        speed = 1,
-        damage = 10,
-        armor = 0,
-        vim_power = 1,
-        luck = 1
+        damage = 10
     },
 
-    -- World
     enemies = {},
     items_on_ground = {},
     current_room = 1,
-    rooms_cleared = 0,
 
-    -- Stats (session only)
-    session_stats = {
-        enemies_killed = 0,
-        items_collected = 0,
-        damage_dealt = 0,
-        damage_taken = 0,
-        commands_used = 0,
-        play_time = 0,
-        best_combo = 0
-    }
+    map_width = 60,
+    map_height = 20
 }
 
--- Initialize game
-function M.setup(opts)
-    M.config = vim.tbl_extend("force", {
-        width = 80,
-        height = 30,
-        difficulty = "normal"
-    }, opts or {})
+-- Configuration
+M.config = {
+    width = 70,
+    height = 25,
+    difficulty = "normal"
+}
 
+-- Setup function
+function M.setup(opts)
+    M.config = vim.tbl_extend("force", M.config, opts or {})
     M.state.ns_id = api.nvim_create_namespace("nvim_zelda")
 end
 
--- Start new game (no loading)
+-- Start game
 function M.start()
     if M.state.running then
         vim.notify("Game already running!", vim.log.levels.WARN)
@@ -70,25 +119,23 @@ function M.start()
     M.items:init()
     M.quests:init()
 
-    -- Create game window
+    -- Create window
     M.create_window()
 
-    -- Spawn initial room
-    M.spawn_room()
-
-    -- Start game loop
+    -- Start game
     M.state.running = true
-    M.game_loop()
+    M.spawn_room()
+    M.render()
 
-    vim.notify("🎮 Game Started! No saves - make this run count!", vim.log.levels.INFO)
-    vim.notify("💡 Press ? for help, i for inventory, q for quests", vim.log.levels.INFO)
+    vim.notify("🎮 nvim-zelda started! Use hjkl to move, x to attack, q to quit", vim.log.levels.INFO)
 end
 
--- Create game window
+-- Create window
 function M.create_window()
     M.state.buf = api.nvim_create_buf(false, true)
     api.nvim_buf_set_option(M.state.buf, 'buftype', 'nofile')
     api.nvim_buf_set_option(M.state.buf, 'swapfile', false)
+    api.nvim_buf_set_option(M.state.buf, 'filetype', 'zelda')
 
     local width = M.config.width
     local height = M.config.height
@@ -103,38 +150,20 @@ function M.create_window()
         height = height,
         style = 'minimal',
         border = 'rounded',
-        title = ' ⚔️ nvim-zelda: Room ' .. M.state.current_room .. ' ⚔️ ',
+        title = ' ⚔️ Zelda: Room ' .. M.state.current_room .. ' ⚔️ ',
         title_pos = 'center'
     })
 
-    -- Set up controls
-    M.setup_controls()
-end
-
--- Setup controls
-function M.setup_controls()
+    -- Setup keymaps
     local keymaps = {
-        -- Movement
         ['h'] = function() M.move_player(-1, 0) end,
         ['j'] = function() M.move_player(0, 1) end,
         ['k'] = function() M.move_player(0, -1) end,
         ['l'] = function() M.move_player(1, 0) end,
-
-        -- Combat
         ['x'] = function() M.attack() end,
-        ['d'] = function() M.special_attack("delete") end,
-
-        -- Items
-        ['e'] = function() M.pickup_item() end,
-        ['u'] = function() M.use_item_quick() end,
-
-        -- UI
         ['i'] = function() M.show_inventory() end,
-        ['q'] = function() M.show_quests() end,
         ['?'] = function() M.show_help() end,
-
-        -- Quit (no save)
-        ['Q'] = function() M.quit() end,
+        ['q'] = function() M.quit() end,
         ['<Esc>'] = function() M.quit() end
     }
 
@@ -153,94 +182,79 @@ function M.move_player(dx, dy)
     local new_y = M.state.player.y + dy
 
     -- Check bounds
-    if new_x < 2 or new_x > 78 or new_y < 2 or new_y > 28 then
-        return
-    end
+    if new_x >= 2 and new_x < M.state.map_width - 1 and
+       new_y >= 2 and new_y < M.state.map_height - 1 then
 
-    -- Check enemy collision
-    for _, enemy in ipairs(M.state.enemies) do
-        if enemy.x == new_x and enemy.y == new_y then
-            -- Take damage
-            local damage_result = M.health:take_damage(enemy.damage, enemy.damage_type, enemy)
-            vim.notify(damage_result.message, vim.log.levels.WARN)
+        -- Check enemy collision
+        for _, enemy in ipairs(M.state.enemies) do
+            if enemy.x == new_x and enemy.y == new_y then
+                local result = M.health:take_damage(10)
+                vim.notify(result.message, vim.log.levels.WARN)
 
-            -- Check death
-            if M.state.player.health <= 0 then
-                M.game_over()
+                if M.health.state.current_hp <= 0 then
+                    M.game_over()
+                end
+                return
             end
-            return
         end
+
+        -- Move
+        M.state.player.x = new_x
+        M.state.player.y = new_y
+
+        -- Update quest if available
+        if M.quests and M.quests.update_progress then
+            M.quests:update_progress("move_with_hjkl", 1)
+        end
+
+        -- Check for items
+        for i = #M.state.items_on_ground, 1, -1 do
+            local item = M.state.items_on_ground[i]
+            if item.x == new_x and item.y == new_y then
+                M.items:add_to_inventory(item)
+                table.remove(M.state.items_on_ground, i)
+                vim.notify("Picked up item!", vim.log.levels.INFO)
+            end
+        end
+
+        M.render()
     end
-
-    -- Move
-    M.state.player.x = new_x
-    M.state.player.y = new_y
-
-    -- Update quest progress
-    M.quests:update_progress("move_with_hjkl", 1)
-
-    -- Check item pickup
-    M.check_item_pickup()
-
-    -- Check room exit
-    M.check_room_exit()
-
-    M.render()
 end
 
 -- Attack
 function M.attack()
-    local killed = {}
+    local killed = 0
 
     for i = #M.state.enemies, 1, -1 do
         local enemy = M.state.enemies[i]
         if math.abs(enemy.x - M.state.player.x) <= 1 and
            math.abs(enemy.y - M.state.player.y) <= 1 then
-            enemy.health = enemy.health - M.state.player.damage
+            table.remove(M.state.enemies, i)
+            killed = killed + 1
+            M.state.player.xp = M.state.player.xp + 10
 
-            if enemy.health <= 0 then
-                table.insert(killed, enemy)
-                table.remove(M.state.enemies, i)
-
-                -- Drop items
-                local drops = M.items:generate_drop(enemy.level, M.state.player.luck)
-                for _, item in ipairs(drops) do
-                    table.insert(M.state.items_on_ground, {
-                        item = item,
-                        x = enemy.x,
-                        y = enemy.y
-                    })
-                end
-
-                -- Update stats
-                M.state.session_stats.enemies_killed = M.state.session_stats.enemies_killed + 1
-                M.quests:update_progress("defeat_enemies", 1)
-
-                -- XP
-                M.state.player.xp = M.state.player.xp + enemy.xp_value
-                vim.notify("+1" .. enemy.xp_value .. " XP", vim.log.levels.INFO)
+            -- Drop item chance
+            if math.random() > 0.7 then
+                table.insert(M.state.items_on_ground, {
+                    x = enemy.x,
+                    y = enemy.y,
+                    sprite = "💰",
+                    name = "Coin"
+                })
             end
         end
     end
 
-    if #killed > 0 then
-        vim.notify("Defeated " .. #killed .. " enemies!", vim.log.levels.INFO)
+    if killed > 0 then
+        vim.notify("Defeated " .. killed .. " enemies! +10 XP", vim.log.levels.INFO)
+
+        -- Check room clear
+        if #M.state.enemies == 0 then
+            vim.notify("Room cleared! Move right to continue →", vim.log.levels.INFO)
+        end
     end
 
     M.render()
-end
-
--- Check item pickup
-function M.check_item_pickup()
-    for i = #M.state.items_on_ground, 1, -1 do
-        local item_drop = M.state.items_on_ground[i]
-        if item_drop.x == M.state.player.x and item_drop.y == M.state.player.y then
-            if M.items:add_to_inventory(item_drop.item) then
-                table.remove(M.state.items_on_ground, i)
-                M.quests:update_progress("collect_items", 1)
-            end
-        end
-    end
 end
 
 -- Spawn room
@@ -248,70 +262,54 @@ function M.spawn_room()
     M.state.enemies = {}
     M.state.items_on_ground = {}
 
-    -- Spawn enemies based on room number
-    local enemy_count = 2 + math.floor(M.state.current_room / 2)
+    -- Spawn enemies
+    local enemy_count = 2 + M.state.current_room
     for i = 1, enemy_count do
         table.insert(M.state.enemies, {
-            x = math.random(10, 70),
-            y = math.random(5, 25),
+            x = math.random(10, M.state.map_width - 10),
+            y = math.random(5, M.state.map_height - 5),
             sprite = "👹",
-            health = 20 + (M.state.current_room * 5),
-            damage = 5 + M.state.current_room,
-            damage_type = "physical",
-            level = M.state.current_room,
-            xp_value = 10 * M.state.current_room
+            health = 10
         })
     end
 
-    -- Spawn some items
-    local item_count = math.random(1, 3)
-    for i = 1, item_count do
-        local item = M.items.database[math.random(#M.items.database)]
+    -- Spawn items
+    for i = 1, 3 do
         table.insert(M.state.items_on_ground, {
-            item = item,
-            x = math.random(10, 70),
-            y = math.random(5, 25)
+            x = math.random(5, M.state.map_width - 5),
+            y = math.random(3, M.state.map_height - 3),
+            sprite = "🧪",
+            name = "Potion"
         })
-    end
-end
-
--- Check room exit
-function M.check_room_exit()
-    if #M.state.enemies == 0 then
-        if M.state.player.x >= 77 then
-            -- Next room
-            M.state.current_room = M.state.current_room + 1
-            M.state.rooms_cleared = M.state.rooms_cleared + 1
-            M.state.player.x = 3
-            M.spawn_room()
-            vim.notify("🚪 Entered Room " .. M.state.current_room, vim.log.levels.INFO)
-
-            -- Heal a bit between rooms
-            M.health:heal(10, "regen")
-        end
     end
 end
 
 -- Show inventory
 function M.show_inventory()
-    local display = M.items:get_inventory_display()
-    vim.notify(display, vim.log.levels.INFO)
+    if M.items and M.items.get_inventory_display then
+        vim.notify(M.items:get_inventory_display(), vim.log.levels.INFO)
+    else
+        vim.notify("Inventory not available", vim.log.levels.WARN)
+    end
 end
 
--- Show quests
-function M.show_quests()
-    local display = M.quests:get_quest_display()
-    vim.notify(display, vim.log.levels.INFO)
+-- Show help
+function M.show_help()
+    local help = [[
+=== CONTROLS ===
+h/j/k/l - Move
+x - Attack
+i - Inventory
+? - Help
+q - Quit
+
+=== GOAL ===
+Clear rooms and survive!
+]]
+    vim.notify(help, vim.log.levels.INFO)
 end
 
--- Use item quickly (slot 1)
-function M.use_item_quick()
-    local result, message = M.items:use_item(1, M.state.player)
-    vim.notify(message, result and vim.log.levels.INFO or vim.log.levels.WARN)
-    M.render()
-end
-
--- Render game
+-- Render
 function M.render()
     if not M.state.buf or not api.nvim_buf_is_valid(M.state.buf) then
         return
@@ -319,43 +317,39 @@ function M.render()
 
     local lines = {}
 
-    -- Create map
-    for y = 1, 30 do
+    -- Draw map
+    for y = 1, M.state.map_height do
         local line = ""
-        for x = 1, 80 do
-            local char = " "
-
-            -- Borders
-            if y == 1 or y == 30 then
-                char = "═"
-            elseif x == 1 or x == 80 then
-                char = "║"
-            -- Player
+        for x = 1, M.state.map_width do
+            if x == 1 or x == M.state.map_width then
+                line = line .. "|"
+            elseif y == 1 or y == M.state.map_height then
+                line = line .. "-"
             elseif x == M.state.player.x and y == M.state.player.y then
-                char = "@"
+                line = line .. "@"
             else
-                -- Enemies
-                local found = false
+                local char = "."
+
+                -- Check enemies
                 for _, enemy in ipairs(M.state.enemies) do
                     if enemy.x == x and enemy.y == y then
                         char = enemy.sprite
-                        found = true
                         break
                     end
                 end
 
-                -- Items
-                if not found then
-                    for _, item_drop in ipairs(M.state.items_on_ground) do
-                        if item_drop.x == x and item_drop.y == y then
-                            char = item_drop.item.sprite
+                -- Check items
+                if char == "." then
+                    for _, item in ipairs(M.state.items_on_ground) do
+                        if item.x == x and item.y == y then
+                            char = item.sprite
                             break
                         end
                     end
                 end
-            end
 
-            line = line .. char
+                line = line .. char
+            end
         end
         table.insert(lines, line)
     end
@@ -363,90 +357,22 @@ function M.render()
     -- HUD
     table.insert(lines, "")
 
-    -- Health display
     local health_display = M.health:get_display()
     table.insert(lines, health_display.text)
+    table.insert(lines, "Room: " .. M.state.current_room .. " | XP: " .. M.state.player.xp .. " | Enemies: " .. #M.state.enemies)
+    table.insert(lines, "Controls: hjkl=move | x=attack | i=inventory | ?=help | q=quit")
 
-    -- Stats line
-    table.insert(lines, string.format("Room: %d | XP: %d | Enemies: %d | Items: %d",
-                                     M.state.current_room,
-                                     M.state.player.xp,
-                                     #M.state.enemies,
-                                     #M.items.inventory.slots))
-
-    -- Quest progress (if active)
-    if M.quests.active.main then
-        local quest = M.quests.active.main
-        local next_obj = nil
-        for _, obj in ipairs(quest.objectives) do
-            if not obj.completed then
-                next_obj = obj
-                break
-            end
-        end
-        if next_obj then
-            table.insert(lines, string.format("Quest: %s (%d/%d)",
-                                             next_obj.description,
-                                             next_obj.progress,
-                                             next_obj.required))
-        end
-    end
-
-    -- Controls reminder
-    table.insert(lines, "Controls: hjkl=move | x=attack | e=pickup | i=inventory | q=quests | Q=quit")
-
-    -- Update buffer
     api.nvim_buf_set_lines(M.state.buf, 0, -1, false, lines)
-end
-
--- Game loop
-function M.game_loop()
-    if not M.state.running then return end
-
-    -- Update systems
-    M.state.session_stats.play_time = M.state.session_stats.play_time + 1
-
-    -- Enemy AI (simple)
-    for _, enemy in ipairs(M.state.enemies) do
-        if math.random() > 0.7 then
-            local dx = 0
-            local dy = 0
-            if enemy.x < M.state.player.x then dx = 1
-            elseif enemy.x > M.state.player.x then dx = -1
-            end
-            if enemy.y < M.state.player.y then dy = 1
-            elseif enemy.y > M.state.player.y then dy = -1
-            end
-
-            enemy.x = math.max(2, math.min(78, enemy.x + dx))
-            enemy.y = math.max(2, math.min(28, enemy.y + dy))
-        end
-    end
-
-    -- Render
-    M.render()
-
-    -- Continue loop
-    vim.defer_fn(function()
-        M.game_loop()
-    end, 100)
 end
 
 -- Game over
 function M.game_over()
     M.state.running = false
-
-    vim.notify("💀 GAME OVER!", vim.log.levels.ERROR)
-    vim.notify("Final Stats:", vim.log.levels.INFO)
-    vim.notify("  Rooms Cleared: " .. M.state.rooms_cleared, vim.log.levels.INFO)
-    vim.notify("  Enemies Killed: " .. M.state.session_stats.enemies_killed, vim.log.levels.INFO)
-    vim.notify("  Items Collected: " .. M.state.session_stats.items_collected, vim.log.levels.INFO)
-    vim.notify("  Total XP: " .. M.state.player.xp, vim.log.levels.INFO)
-
+    vim.notify("💀 GAME OVER! Score: " .. M.state.player.xp, vim.log.levels.ERROR)
     M.quit()
 end
 
--- Quit game (no save)
+-- Quit
 function M.quit()
     M.state.running = false
 
@@ -455,38 +381,15 @@ function M.quit()
     end
 
     if M.state.buf and api.nvim_buf_is_valid(M.state.buf) then
-        api.nvim_buf_delete(M.state.buf, {force = true})
+        api.nvim_buf_delete(M.state.buf, { force = true })
     end
 
-    vim.notify("Thanks for playing! (No save - start fresh next time!)", vim.log.levels.INFO)
-end
-
--- Show help
-function M.show_help()
-    local help = [[
-=== CONTROLS ===
-h/j/k/l - Move
-x - Attack adjacent enemies
-d - Special delete attack
-e - Pickup items
-u - Use item in slot 1
-i - Show inventory
-q - Show quests
-? - This help
-Q - Quit (no save)
-
-=== TIPS ===
-- Clear enemies to proceed to next room
-- Complete quests for rewards
-- Manage health carefully - no saves!
-- Items drop from enemies
-- Each room gets harder
-]]
-    vim.notify(help, vim.log.levels.INFO)
+    vim.notify("Thanks for playing nvim-zelda!", vim.log.levels.INFO)
 end
 
 -- Commands
 vim.api.nvim_create_user_command('Zelda', function() M.start() end, {})
+vim.api.nvim_create_user_command('ZeldaStart', function() M.start() end, {})
 vim.api.nvim_create_user_command('ZeldaQuit', function() M.quit() end, {})
 
 return M

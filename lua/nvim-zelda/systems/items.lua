@@ -378,8 +378,7 @@ function Items:get_inventory_display()
         end
     end
 
-    return table.concat(lines, "
-")
+    return table.concat(lines, "\n")
 end
 
 return Items

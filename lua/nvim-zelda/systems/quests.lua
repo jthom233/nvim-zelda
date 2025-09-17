@@ -360,8 +360,7 @@ function Quests:get_quest_display()
         end
     end
 
-    return table.concat(lines, "
-")
+    return table.concat(lines, "\n")
 end
 
 -- Helper function
