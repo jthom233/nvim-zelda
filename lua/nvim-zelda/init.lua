@@ -1041,8 +1041,6 @@ function M.quit()
     vim.notify("Thanks for training! You reached room " .. M.state.current_room, vim.log.levels.INFO)
 end
 
--- Commands
-vim.api.nvim_create_user_command('Zelda', function() M.start() end, {})
-vim.api.nvim_create_user_command('ZeldaQuit', function() M.quit() end, {})
+-- Commands are registered in plugin/nvim-zelda.lua to ensure availability
 
 return M

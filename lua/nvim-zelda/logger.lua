@@ -427,32 +427,6 @@ function M.export_logs()
     end
 end
 
--- Register commands
-vim.api.nvim_create_user_command('ZeldaLogs', function()
-    M.show_logs()
-end, {})
-
-vim.api.nvim_create_user_command('ZeldaClearLogs', function()
-    M.clear_logs()
-end, {})
-
-vim.api.nvim_create_user_command('ZeldaExportLogs', function()
-    M.export_logs()
-end, {})
-
-vim.api.nvim_create_user_command('ZeldaLogLevel', function(opts)
-    local level_name = opts.args:upper()
-    if M.levels[level_name] then
-        M.config.level = M.levels[level_name]
-        vim.notify("Log level set to: " .. level_name, vim.log.levels.INFO)
-    else
-        vim.notify("Invalid log level. Use: DEBUG, INFO, WARN, ERROR, or FATAL", vim.log.levels.ERROR)
-    end
-end, {
-    nargs = 1,
-    complete = function()
-        return { "DEBUG", "INFO", "WARN", "ERROR", "FATAL" }
-    end
-})
+-- Commands are registered in plugin/nvim-zelda.lua to ensure availability
 
 return M

@@ -244,17 +244,6 @@ function M.export_stats()
     end
 end
 
--- Register commands
-vim.api.nvim_create_user_command('ZeldaDashboard', function()
-    M.show_dashboard()
-end, {})
-
-vim.api.nvim_create_user_command('ZeldaStats', function()
-    M.show_quick_stats()
-end, {})
-
-vim.api.nvim_create_user_command('ZeldaExport', function()
-    M.export_stats()
-end, {})
+-- Commands are registered in plugin/nvim-zelda.lua to ensure availability
 
 return M
