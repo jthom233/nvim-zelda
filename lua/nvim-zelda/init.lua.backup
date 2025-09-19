@@ -1053,9 +1053,7 @@ function M.show_inventory()
     table.insert(lines, "╚══════════════════════════════════════════════╝")
 
     -- Clear buffer and show inventory
-    vim.api.nvim_buf_set_option(M.state.buf, 'modifiable', true)
     api.nvim_buf_set_lines(M.state.buf, 0, -1, false, lines)
-    vim.api.nvim_buf_set_option(M.state.buf, 'modifiable', false)
 end
 
 -- Pickup items
@@ -1286,6 +1284,7 @@ function M.render()
     vim.api.nvim_buf_set_option(M.state.buf, 'modifiable', true)
     api.nvim_buf_set_lines(M.state.buf, 0, -1, false, lines)
     vim.api.nvim_buf_set_option(M.state.buf, 'modifiable', false)
+
     -- Hide the real cursor - we only want the @ character visible
     if M.state.win and api.nvim_win_is_valid(M.state.win) then
         -- Hide cursor by setting it off-screen or to a fixed position
