@@ -582,4 +582,164 @@ function M.get_enemy_sprite(enemy_type)
     return sprites[enemy_type] or "E"
 end
 
+-- Enhanced AI behaviors for smarter enemies
+function M.EnemyBehavior:flank_player(enemy, player, obstacles)
+    -- Try to position behind or beside the player
+    local flanking_positions = {
+        { x = player.x + 1, y = player.y },     -- Right
+        { x = player.x - 1, y = player.y },     -- Left
+        { x = player.x, y = player.y + 1 },     -- Below
+        { x = player.x, y = player.y - 1 },     -- Above
+        { x = player.x + 1, y = player.y + 1 }, -- Diagonal
+        { x = player.x - 1, y = player.y - 1 }, -- Diagonal
+    }
+
+    -- Find the best flanking position that's not blocked
+    for _, pos in ipairs(flanking_positions) do
+        if not M.is_position_blocked(pos.x, pos.y, obstacles) then
+            return self:move_to(enemy, pos, obstacles)
+        end
+    end
+
+    -- Fall back to direct pursuit
+    return self:pursue(enemy, player, obstacles)
+end
+
+function M.EnemyBehavior:coordinate_with_allies(enemy, player, all_enemies)
+    -- Count nearby allies
+    local nearby_allies = 0
+    local ally_positions = {}
+
+    for _, other_enemy in ipairs(all_enemies) do
+        if other_enemy ~= enemy then
+            local distance = M.manhattan_distance(enemy, other_enemy)
+            if distance <= 3 then
+                nearby_allies = nearby_allies + 1
+                table.insert(ally_positions, other_enemy)
+            end
+        end
+    end
+
+    -- If we have allies, coordinate attack
+    if nearby_allies >= 1 then
+        -- Try to surround the player
+        local player_distance = M.manhattan_distance(enemy, player)
+
+        if player_distance <= 2 then
+            -- Close enough - try to position strategically
+            return self:flank_player(enemy, player, {})
+        else
+            -- Move to engage
+            return self:pursue(enemy, player, {})
+        end
+    end
+
+    -- No coordination needed, use normal behavior
+    return self:pursue(enemy, player, {})
+end
+
+function M.EnemyBehavior:ambush_behavior(enemy, player, obstacles)
+    -- Wait until player gets close, then surprise attack
+    local distance = M.manhattan_distance(enemy, player)
+
+    if distance > 2 and distance <= self.detection_range then
+        -- Stay still and wait for player to come closer
+        return { dx = 0, dy = 0 }
+    elseif distance <= 2 then
+        -- Spring the ambush!
+        return self:pursue(enemy, player, obstacles)
+    end
+
+    return self:patrol(enemy)
+end
+
+function M.EnemyBehavior:retreat_and_regroup(enemy, player, obstacles)
+    -- If low health, try to retreat to a safer position
+    if enemy.hp < (enemy.max_hp * 0.3) then
+        -- Find positions further from player
+        local retreat_positions = {}
+        for dx = -2, 2 do
+            for dy = -2, 2 do
+                local pos = { x = enemy.x + dx, y = enemy.y + dy }
+                local player_dist = M.manhattan_distance(pos, player)
+                local current_dist = M.manhattan_distance(enemy, player)
+
+                if player_dist > current_dist and not M.is_position_blocked(pos.x, pos.y, obstacles) then
+                    table.insert(retreat_positions, pos)
+                end
+            end
+        end
+
+        if #retreat_positions > 0 then
+            -- Move to the furthest retreat position
+            local best_retreat = retreat_positions[1]
+            local max_distance = M.manhattan_distance(best_retreat, player)
+
+            for _, pos in ipairs(retreat_positions) do
+                local dist = M.manhattan_distance(pos, player)
+                if dist > max_distance then
+                    max_distance = dist
+                    best_retreat = pos
+                end
+            end
+
+            return self:move_to(enemy, best_retreat, obstacles)
+        end
+    end
+
+    return self:pursue(enemy, player, obstacles)
+end
+
+-- Enhanced update function with smarter behaviors
+function M.EnemyBehavior:enhanced_update(enemy, player, all_enemies, obstacles, dt)
+    self.state_timer = self.state_timer + dt
+
+    local distance = M.manhattan_distance(enemy, player)
+    local can_see_player = M.has_line_of_sight(enemy, player, obstacles)
+
+    -- Enhanced behavior based on enemy type
+    if enemy.type == "goblin" then
+        -- Goblins are sneaky - use ambush tactics
+        if self.state == "idle" or self.state == "searching" then
+            if can_see_player and distance <= self.detection_range then
+                self.state = "pursuing"
+                return self:ambush_behavior(enemy, player, obstacles)
+            end
+        elseif self.state == "pursuing" then
+            return self:ambush_behavior(enemy, player, obstacles)
+        end
+    elseif enemy.type == "orc" then
+        -- Orcs are aggressive and coordinate
+        if can_see_player then
+            self.state = "pursuing"
+            return self:coordinate_with_allies(enemy, player, all_enemies)
+        end
+    elseif enemy.type == "skeleton" then
+        -- Skeletons are tactical - flank and retreat when hurt
+        if can_see_player then
+            self.state = "pursuing"
+            return self:retreat_and_regroup(enemy, player, obstacles)
+        end
+    elseif enemy.type == "guard" then
+        -- Guards are defensive but smart
+        if can_see_player and distance <= 4 then
+            self.state = "pursuing"
+            return self:flank_player(enemy, player, obstacles)
+        end
+    elseif enemy.type == "boss" then
+        -- Boss uses all tactics dynamically
+        if can_see_player then
+            self.state = "pursuing"
+            if enemy.hp < (enemy.max_hp * 0.5) then
+                return self:retreat_and_regroup(enemy, player, obstacles)
+            else
+                return self:coordinate_with_allies(enemy, player, all_enemies)
+            end
+        end
+    end
+
+    -- Fall back to standard behavior
+    return self:update(enemy, player, obstacles, dt)
+end
+
 return M

@@ -3,13 +3,14 @@ local M = {}
 local api = vim.api
 
 -- Lazy load modules for performance
-local persistence, learning, ai_system, logger
+local persistence, learning, ai_system, logger, tutorial_system
 
 local function load_modules()
     if not persistence then
         persistence = require('nvim-zelda.persistence')
         learning = require('nvim-zelda.learning_engine')
         ai_system = require('nvim-zelda.ai_system')
+        tutorial_system = require('nvim-zelda.tutorial_system')
 
         -- Logger disabled by default for performance
         logger = {
@@ -78,13 +79,15 @@ M.config = {
     teach_mode = true
 }
 
--- Room templates with vim challenges
+-- Extended room templates for 20 levels
 M.room_templates = {
+    -- BEGINNER LEVELS (1-5)
     {
         name = "Tutorial Room",
         layout = "basic",
         vim_lesson = "hjkl movement",
         enemies = 2,
+        difficulty = 1,
         hint = "Use h (left), j (down), k (up), l (right) to move!"
     },
     {
@@ -92,28 +95,158 @@ M.room_templates = {
         layout = "platforms",
         vim_lesson = "w/b word movement",
         enemies = 3,
+        difficulty = 1,
         hint = "Press w to jump forward by word, b to jump backward!"
     },
     {
+        name = "Line Navigator",
+        layout = "horizontal",
+        vim_lesson = "0 $ ^ movement",
+        enemies = 3,
+        difficulty = 1,
+        hint = "Use 0 for line start, $ for end, ^ for first char!"
+    },
+    {
+        name = "Vertical Valley",
+        layout = "vertical",
+        vim_lesson = "gg G { }",
+        enemies = 4,
+        difficulty = 1,
+        hint = "Jump to top with gg, bottom with G, paragraphs with {}"
+    },
+    {
+        name = "Find Forest",
+        layout = "scattered",
+        vim_lesson = "f F t T",
+        enemies = 3,
+        difficulty = 1,
+        hint = "Find characters with f<char>, till with t<char>"
+    },
+
+    -- INTERMEDIATE LEVELS (6-10)
+    {
         name = "Delete Dungeon",
         layout = "maze",
-        vim_lesson = "dd delete command",
+        vim_lesson = "dd dw d$",
         enemies = 4,
-        hint = "Press dd to delete entire enemy lines!"
+        difficulty = 2,
+        hint = "Delete lines with dd, words with dw, to line end with d$"
     },
     {
         name = "Visual Valley",
         layout = "open",
-        vim_lesson = "visual mode",
+        vim_lesson = "v V Ctrl-v",
         enemies = 5,
-        hint = "Press v for visual mode, then select multiple enemies!"
+        difficulty = 2,
+        hint = "Visual mode: v (char), V (line), Ctrl-v (block)"
+    },
+    {
+        name = "Yank Yard",
+        layout = "puzzle",
+        vim_lesson = "y yy p P",
+        enemies = 4,
+        difficulty = 2,
+        hint = "Copy with y/yy, paste with p (after) or P (before)"
     },
     {
         name = "Search Sanctuary",
-        layout = "puzzle",
-        vim_lesson = "/ search",
-        enemies = 3,
-        hint = "Press / followed by enemy type to highlight them!"
+        layout = "complex",
+        vim_lesson = "/ ? n N * #",
+        enemies = 5,
+        difficulty = 2,
+        hint = "Search with /, reverse with ?, repeat with n/N"
+    },
+    {
+        name = "Undo Universe",
+        layout = "tricky",
+        vim_lesson = "u Ctrl-r .",
+        enemies = 5,
+        difficulty = 2,
+        hint = "Undo with u, redo with Ctrl-r, repeat last with ."
+    },
+
+    -- ADVANCED LEVELS (11-15)
+    {
+        name = "Object Ocean",
+        layout = "islands",
+        vim_lesson = "iw aw i( a(",
+        enemies = 6,
+        difficulty = 3,
+        hint = "Text objects: iw (in word), aw (around word), i(/a( for parens"
+    },
+    {
+        name = "Mark Mountain",
+        layout = "peaks",
+        vim_lesson = "m ' ` Ctrl-o",
+        enemies = 6,
+        difficulty = 3,
+        hint = "Set mark with m<letter>, jump with '<letter>, exact with `"
+    },
+    {
+        name = "Macro Maze",
+        layout = "recursive",
+        vim_lesson = "q @ @@",
+        enemies = 7,
+        difficulty = 3,
+        hint = "Record macro with q<letter>, stop with q, play with @<letter>"
+    },
+    {
+        name = "Register Realm",
+        layout = "vaults",
+        vim_lesson = '"a "+ "*',
+        enemies = 7,
+        difficulty = 3,
+        hint = 'Use registers: "a for named, "+ for clipboard'
+    },
+    {
+        name = "Substitute Station",
+        layout = "patterns",
+        vim_lesson = ":s/ :%s/ :g/",
+        enemies = 8,
+        difficulty = 3,
+        hint = "Replace with :s/old/new/, global with :%s//g"
+    },
+
+    -- EXPERT LEVELS (16-20)
+    {
+        name = "Window World",
+        layout = "split",
+        vim_lesson = "Ctrl-w s/v/hjkl",
+        enemies = 8,
+        difficulty = 4,
+        hint = "Split windows with Ctrl-w s/v, navigate with Ctrl-w hjkl"
+    },
+    {
+        name = "Fold Fortress",
+        layout = "layered",
+        vim_lesson = "zf zo zc za",
+        enemies = 9,
+        difficulty = 4,
+        hint = "Create folds with zf, open with zo, close with zc"
+    },
+    {
+        name = "Completion Cave",
+        layout = "corridors",
+        vim_lesson = "Ctrl-n/p Ctrl-x",
+        enemies = 9,
+        difficulty = 4,
+        hint = "Autocomplete with Ctrl-n/p, special with Ctrl-x"
+    },
+    {
+        name = "Quickfix Quest",
+        layout = "checkpoints",
+        vim_lesson = ":cn :cp :copen",
+        enemies = 10,
+        difficulty = 4,
+        hint = "Navigate errors with :cn/:cp, view all with :copen"
+    },
+    {
+        name = "Master's Chamber",
+        layout = "boss",
+        vim_lesson = "All Commands",
+        enemies = 12,
+        difficulty = 5,
+        hint = "Final Boss: Use all your Vim skills to triumph!"
     }
 }
 
@@ -127,12 +260,13 @@ function M.setup(opts)
     -- Set up highlight groups for colors
     vim.cmd([[
         highlight ZeldaHealth guifg=#ff0000 ctermfg=Red
-        highlight ZeldaHealthBar guifg=#00ff00 ctermfg=Green
+        highlight ZeldaHealthBar guifg=#ff0000 ctermfg=Red
         highlight ZeldaEnemy guifg=#ff6600 ctermfg=Yellow
         highlight ZeldaItem guifg=#00ffff ctermfg=Cyan
         highlight ZeldaWall guifg=#666666 ctermfg=Gray
         highlight ZeldaDoor guifg=#ffff00 ctermfg=Yellow
         highlight ZeldaPlayer guifg=#ffffff ctermfg=White
+        highlight ZeldaKey guifg=#ffff00 ctermfg=Yellow
     ]])
 end
 
@@ -186,6 +320,13 @@ function M.start()
         room = M.state.current_room,
         player_id = M.state.player.id
     })
+
+    -- Show tutorial overlay for current level
+    if tutorial_system then
+        vim.defer_fn(function()
+            tutorial_system.show_tutorial_overlay(M.state.buf)
+        end, 500)
+    end
 
     vim.notify("🎮 Welcome to Vim Training! Room 1: " .. M.room_templates[1].hint, vim.log.levels.INFO)
 end
@@ -460,6 +601,7 @@ function M.generate_room(room_num)
         -- Create enemy with real AI
         local enemy = ai_system.create_enemy(enemy_type, x, y)
         enemy.id = i
+        enemy.max_hp = enemy.hp  -- Store max HP for retreat calculations
         table.insert(M.state.enemies, enemy)
     end
 
@@ -473,12 +615,33 @@ function M.generate_room(room_num)
         {sprite = "📜", name = "scroll", type = "vim_power"}
     }
 
-    -- Deterministic item count based on room number
-    local item_count = 3 + (room_num % 4)
+    -- Always ensure one key per room (required for progression)
+    local key_item = {sprite = "🔑", name = "key", type = "key"}
+    local key_x = math.floor((room_num * 7) % (M.state.map_width - 20)) + 10
+    local key_y = math.floor((room_num * 11) % (M.state.map_height - 10)) + 5
+
+    table.insert(M.state.items, {
+        x = key_x, y = key_y,
+        sprite = key_item.sprite,
+        name = key_item.name,
+        type = key_item.type
+    })
+
+    -- Add other items deterministically
+    local item_count = 2 + (room_num % 3)  -- Reduced count since key is guaranteed
 
     for i = 1, item_count do
-        local item_index = ((room_num * 3 + i - 1) % #item_types) + 1
-        local item = item_types[item_index]
+        -- Skip key items to avoid duplicates
+        local non_key_types = {
+            {sprite = "❤️", name = "heart", type = "health"},
+            {sprite = "💰", name = "coin", type = "currency"},
+            {sprite = "⚔️", name = "sword", type = "weapon"},
+            {sprite = "🛡️", name = "shield", type = "armor"},
+            {sprite = "📜", name = "scroll", type = "vim_power"}
+        }
+
+        local item_index = ((room_num * 3 + i - 1) % #non_key_types) + 1
+        local item = non_key_types[item_index]
 
         -- Fibonacci sequence for item placement
         local fib_a, fib_b = 1, 1
@@ -505,56 +668,89 @@ function M.generate_room(room_num)
     })
 end
 
--- Generate room layouts
+-- VIM-ADVENTURES STYLE MAZE GENERATION
+-- Each room forces specific vim movements to complete
+
 function M.generate_basic_room()
-    -- Add some obstacles
-    for i = 1, 5 do
-        table.insert(M.state.obstacles, {
-            x = math.random(10, M.state.map_width - 10),
-            y = math.random(5, M.state.map_height - 5),
-            sprite = "🌳",
-            solid = true
-        })
-    end
+    -- HJKL Training Maze - Forces basic movement
+    local hjkl_maze = {
+        "██████████████████████████████████████████████████████████████████",
+        "█   █     █     █     █     █     █     █     █     █     █     █",
+        "█ █ █ ███ █ ███ █ ███ █ ███ █ ███ █ ███ █ ███ █ ███ █ ███ █ ███ █",
+        "█ █   █   █   █   █   █   █   █   █   █   █   █   █   █   █   █   █",
+        "█ █████ █████ █████ █████ █████ █████ █████ █████ █████ █████ █████",
+        "█       █     █     █     █     █     █     █     █     █         █",
+        "███████ █ ███ █ ███ █ ███ █ ███ █ ███ █ ███ █ ███ █ ███ █ ███████",
+        "█       █   █   █   █   █   █   █   █   █   █   █   █   █         █",
+        "█ █████████ █████ █████ █████ █████ █████ █████ █████ █████████ █",
+        "█         █     █     █     █     █     █     █     █         █   █",
+        "█████████ █ ███ █ ███ █ ███ █ ███ █ ███ █ ███ █ ███ █ █████████ █",
+        "█         █   █   █   █   █   █   █   █   █   █   █   █         █ █",
+        "█ █████████████ █████ █████ █████ █████ █████ █████████████ █████ █",
+        "█                                                                 █",
+        "██████████████████████████████████████████████████████████████████"
+    }
+
+    M.create_maze_from_pattern(hjkl_maze, 2, 2)
 end
 
 function M.generate_platform_room()
-    -- Create platforms that require w/b jumps
-    for i = 1, 4 do
-        local platform_x = i * 15
-        for j = 0, 5 do
-            table.insert(M.state.obstacles, {
-                x = platform_x + j,
-                y = M.state.map_height - 5,
-                sprite = "▓",
-                solid = true
-            })
-        end
-    end
+    -- WORD JUMP Training - Forces w/b/e movements with gaps
+    local word_maze = {
+        "██████████████████████████████████████████████████████████████████",
+        "█         █         █         █         █         █         █   █",
+        "█ ███████ █ ███████ █ ███████ █ ███████ █ ███████ █ ███████ █ █ █",
+        "█         █         █         █         █         █         █   █",
+        "█ █     █ █ █     █ █ █     █ █ █     █ █ █     █ █ █     █ █ █ █",
+        "█ █     █   █     █   █     █   █     █   █     █   █     █   █   █",
+        "█ █     █████     █████     █████     █████     █████     █████ █ █",
+        "█ █                                                             █ █",
+        "█ ███     █████     █████     █████     █████     █████     ███ █ █",
+        "█   █     █   █     █   █     █   █     █   █     █   █     █   █ █",
+        "█ █ █     █ █ █     █ █ █     █ █ █     █ █ █     █ █ █     █ █ █ █",
+        "█ █       █ █       █ █       █ █       █ █       █ █       █ █   █",
+        "█ █████████ █████████ █████████ █████████ █████████ █████████ █████",
+        "█                                                                 █",
+        "██████████████████████████████████████████████████████████████████"
+    }
+
+    M.create_maze_from_pattern(word_maze, 2, 2)
 end
 
 function M.generate_maze_room()
-    -- Create maze walls
-    local maze_pattern = {
-        "####  ####",
-        "#        #",
-        "# #### # #",
-        "#    # # #",
-        "#### # # #",
-        "#      # #",
-        "# ###### #",
-        "#        #",
-        "##########"
+    -- LINE NAVIGATION Maze - Forces 0, $, ^, G, gg movements
+    local line_maze = {
+        "██████████████████████████████████████████████████████████████████",
+        "█                                                                █",
+        "████ ████ ████ ████ ████ ████ ████ ████ ████ ████ ████ ████ ████ █",
+        "█  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █",
+        "█  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █",
+        "█  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █",
+        "█  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █",
+        "█    █    █    █    █    █    █    █    █    █    █    █    █    █",
+        "████ ████ ████ ████ ████ ████ ████ ████ ████ ████ ████ ████ ████ █",
+        "█  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █",
+        "█  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █",
+        "█  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █  █ █",
+        "█                                                                █",
+        "█                                                                █",
+        "██████████████████████████████████████████████████████████████████"
     }
 
-    for y, row in ipairs(maze_pattern) do
+    M.create_maze_from_pattern(line_maze, 2, 2)
+end
+
+-- Helper function to create obstacles from maze patterns
+function M.create_maze_from_pattern(pattern, start_x, start_y)
+    for y, row in ipairs(pattern) do
         for x = 1, #row do
-            if row:sub(x, x) == "#" then
+            if row:sub(x, x) == "█" then
                 table.insert(M.state.obstacles, {
-                    x = x * 3 + 10,
-                    y = y * 2 + 3,
+                    x = x + (start_x or 0),
+                    y = y + (start_y or 0),
                     sprite = "█",
-                    solid = true
+                    solid = true,
+                    maze_wall = true
                 })
             end
         end
@@ -578,6 +774,11 @@ end
 
 -- Move player with vim training
 function M.move_player(dx, dy, key)
+    -- Track command for tutorial system
+    if tutorial_system then
+        tutorial_system.record_command(key)
+    end
+
     -- Apply repeat count
     local repeat_count = M.state.repeat_count or 1
     dx = dx * repeat_count
@@ -636,7 +837,7 @@ function M.move_player(dx, dy, key)
                 M.next_room()
                 return
             else
-                vim.notify("🔒 Clear all enemies first!", vim.log.levels.WARN)
+                vim.notify("🔒 Find the key first! Look for 🔑", vim.log.levels.WARN)
                 return
             end
         end
@@ -762,7 +963,12 @@ end
 -- Visual mode selection
 function M.enter_visual_mode()
     vim.notify("Visual mode! Select area to attack!", vim.log.levels.INFO)
-    -- TODO: Implement visual selection
+
+    -- Store current position as visual start
+    M.state.visual_start = {x = M.state.player.x, y = M.state.player.y}
+    M.state.visual_end = {x = M.state.player.x, y = M.state.player.y}
+    M.state.visual_mode = true
+
     M.render()
 end
 
@@ -1068,7 +1274,10 @@ function M.pickup_item(item)
         vim.notify(item.sprite .. " +1 coin!", vim.log.levels.INFO)
     elseif item.type == "key" then
         M.state.player.keys = M.state.player.keys + 1
-        vim.notify(item.sprite .. " Got a key!", vim.log.levels.INFO)
+        vim.notify("🔑 ✨ KEY FOUND! ✨ Door will unlock soon!", vim.log.levels.WARN)
+
+        -- Trigger room clearing check immediately
+        M.check_room_clear()
     elseif item.type == "vim_power" then
         M.state.player.vim_power = M.state.player.vim_power + 0.5
         vim.notify(item.sprite .. " Vim power increased!", vim.log.levels.INFO)
@@ -1078,16 +1287,26 @@ function M.pickup_item(item)
     end
 end
 
--- Check if room is cleared
+-- Check if room is cleared (now requires finding the key)
 function M.check_room_clear()
-    if #M.state.enemies == 0 and not M.state.room_cleared then
+    -- Check if there are still keys on the ground
+    local keys_remaining = false
+    for _, item in ipairs(M.state.items) do
+        if item.type == "key" then
+            keys_remaining = true  -- Key is still on the ground
+            break
+        end
+    end
+
+    -- If no keys left on ground, player has collected them all
+    if not keys_remaining and not M.state.room_cleared then
         M.state.room_cleared = true
         for _, door in ipairs(M.state.doors) do
             if door.type == "exit" then
                 door.locked = false
             end
         end
-        vim.notify("🎉 Room cleared! Exit unlocked! →", vim.log.levels.INFO)
+        vim.notify("🔑 Key found! Exit unlocked! →", vim.log.levels.INFO)
     end
 end
 
@@ -1114,8 +1333,8 @@ function M.update_enemies()
 
     for _, enemy in ipairs(M.state.enemies) do
         if enemy.behavior then
-            -- Get AI decision
-            local move = enemy.behavior:update(enemy, M.state.player, obstacles, dt)
+            -- Get AI decision using enhanced AI
+            local move = enemy.behavior:enhanced_update(enemy, M.state.player, M.state.enemies, obstacles, dt)
 
             -- Apply movement if valid
             if move and move.dx then
@@ -1259,23 +1478,41 @@ function M.render()
         end
     end
 
-    -- Main HUD line with HP bar
-    local hud_line = string.format("HP: %d/%d [%s] | 💰%d 🔑%d | Room %d | 👹%d",
+    -- Count remaining keys in the room
+    local keys_remaining = 0
+    for _, item in ipairs(M.state.items) do
+        if item.type == "key" then
+            keys_remaining = keys_remaining + 1
+        end
+    end
+
+    -- Main HUD line with HP bar and key status
+    local key_status = keys_remaining > 0 and "🔍 Find Key!" or "🔑 Found!"
+    local hud_line = string.format("HP: %d/%d [%s] | 💰%d 🔑%d | Room %d | %s",
         M.state.player.hp, M.state.player.max_hp, hp_bar,
         M.state.player.coins, M.state.player.keys,
-        M.state.current_room, #M.state.enemies)
+        M.state.current_room, key_status)
     table.insert(lines, hud_line)
 
-    -- Room status and combo on same line
+    -- Enhanced room status showing objective progress
     local template = M.room_templates[math.min(M.state.current_room, #M.room_templates)]
-    local status_line = "Lesson: " .. template.vim_lesson .. (M.state.room_cleared and " ✅" or " ⏳")
+    local objective_status = ""
+    if keys_remaining > 0 then
+        objective_status = "🎯 Find the key to proceed"
+    elseif M.state.room_cleared then
+        objective_status = "✅ Key found! Exit unlocked → 🚪"
+    else
+        objective_status = "🔄 Checking progress..."
+    end
+
+    local status_line = "Lesson: " .. template.vim_lesson .. " | " .. objective_status
     if #M.state.combo_buffer > 0 then
         status_line = status_line .. " | Combo: " .. M.state.combo_buffer:sub(-10)
     end
     table.insert(lines, status_line)
 
-    -- Compact controls
-    table.insert(lines, "[hjkl:move] [w/b:jump] [x/dd:attack] [/:search] [i:inv] [?:help] [q:quit]")
+    -- Compact controls - emphasize exploration
+    table.insert(lines, "[hjkl:move] [w/b:jump] [x:collect] [/:search] [i:inv] [?:help] [q:quit]")
 
     -- Ensure buffer shows all content
     while #lines < M.config.height do
@@ -1286,6 +1523,15 @@ function M.render()
     vim.api.nvim_buf_set_option(M.state.buf, 'modifiable', true)
     api.nvim_buf_set_lines(M.state.buf, 0, -1, false, lines)
     vim.api.nvim_buf_set_option(M.state.buf, 'modifiable', false)
+
+    -- Apply HP bar highlighting (make it red)
+    local hud_line_idx = M.state.map_height + 1  -- Line after separator
+    local hp_bar_start = string.find(hud_line, "%[")
+    local hp_bar_end = string.find(hud_line, "%]")
+    if hp_bar_start and hp_bar_end then
+        api.nvim_buf_add_highlight(M.state.buf, M.state.ns_id, "ZeldaHealthBar",
+            hud_line_idx, hp_bar_start - 1, hp_bar_end)
+    end
     -- Hide the real cursor - we only want the @ character visible
     if M.state.win and api.nvim_win_is_valid(M.state.win) then
         -- Hide cursor by setting it off-screen or to a fixed position
@@ -1326,9 +1572,10 @@ i - Open inventory
 
 GOAL:
 - Learn vim commands through gameplay
-- Clear enemies to unlock doors
+- Find the key (🔑) to unlock exit doors
 - Progress through increasingly complex rooms
 - Each room teaches new vim concepts
+- Keys are hidden - explore to find them!
 ]]
     vim.notify(help, vim.log.levels.INFO)
 end

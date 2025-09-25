@@ -22,10 +22,12 @@ tmp/
 
 # CLAUDE files (user instructions)
 CLAUDE.md
+CLAUDEBACKUP.md
 .claude/
 claude.json
 .clauderc
 *.claude
+.mcp.json
 
 # Ignore the gitignore file itself from certain operations
 # .gitignore

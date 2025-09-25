@@ -50,6 +50,33 @@ local commands = {
         end
     end,
 
+    -- Tutorial Commands (NEW)
+    ZeldaPractice = function()
+        local tutorial = require('nvim-zelda.tutorial_system')
+        tutorial.toggle_practice_mode()
+    end,
+
+    ZeldaHint = function(args)
+        local tutorial = require('nvim-zelda.tutorial_system')
+        local level = args and args.args or "normal"
+        tutorial.set_hint_level(level)
+    end,
+
+    ZeldaProgress = function()
+        local tutorial = require('nvim-zelda.tutorial_system')
+        vim.notify(tutorial.get_progress_report(), vim.log.levels.INFO)
+    end,
+
+    ZeldaTutorial = function()
+        local tutorial = require('nvim-zelda.tutorial_system')
+        local zelda = require('nvim-zelda')
+        if zelda.state and zelda.state.buf then
+            tutorial.show_tutorial_overlay(zelda.state.buf)
+        else
+            vim.notify("Game not running!", vim.log.levels.WARN)
+        end
+    end,
+
     ZeldaExportLogs = function()
         local logger = require('nvim-zelda.logger')
         if logger.config.enabled then
@@ -79,6 +106,12 @@ local commands = {
 GAME:
   :Zelda            Start the game
   :ZeldaQuit        Quit the game
+
+TUTORIAL:
+  :ZeldaPractice    Toggle practice mode
+  :ZeldaHint        Set hint level (minimal/normal/detailed)
+  :ZeldaProgress    Show learning progress
+  :ZeldaTutorial    Show current lesson overlay
 
 DEBUG (if needed):
   :ZeldaHealth      Check setup
