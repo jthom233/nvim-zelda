@@ -9,6 +9,7 @@ A lightweight, Zelda-inspired game plugin for Neovim that teaches you vim motion
 <img width="702" height="492" alt="image" src="https://github.com/user-attachments/assets/da6984ad-6953-4315-b8b5-1bbd7aba18b8" />
 <img width="740" height="551" alt="image" src="https://github.com/user-attachments/assets/3d1ac9b3-ec20-4e3f-bc40-a9664dbbed84" />
 
+# STILL UNDER DEVELOPMENT!
 
 ## ✨ Features
 
